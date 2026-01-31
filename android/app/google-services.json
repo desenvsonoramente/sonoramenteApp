@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "314128969383",
+    "project_id": "sonoramente-a7432",
+    "storage_bucket": "sonoramente-a7432.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:314128969383:android:97470e2697e499fcd1b582",
+        "android_client_info": {
+          "package_name": "com.sonoramente.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "314128969383-aohknp1h79hhj7j00irqvh3qejhlr5qd.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sonoramente.app",
+            "certificate_hash": "febe17bb51bc379ea7ac96f97230f2f0b1573edd"
+          }
+        },
+        {
+          "client_id": "314128969383-iqjruda814o34vvccl362f2nmcl1cvf6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDcPLbKUDr39fLBdG-tjVzxkaX9-LK0UFA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "314128969383-iqjruda814o34vvccl362f2nmcl1cvf6.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

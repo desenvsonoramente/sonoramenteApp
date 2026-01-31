@@ -1,0 +1,87 @@
+import '../components/edit_profile_dialog.dart';
+
+Future<void> showEditProfileDialog({
+  required BuildContext context,
+  required String fullName,
+  required String bio,
+  required Future<void> Function(String name, String bio) onSave,
+  required VoidCallback onUpdated,
+}) {
+  final nameController = TextEditingController(text: fullName);
+  final bioController = TextEditingController(text: bio);
+  bool isLoading = false;
+
+  return showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (context, setState) {
+          Future<void> handleSave() async {
+            setState(() => isLoading = true);
+            try {
+              await onSave(nameController.text, bioController.text);
+              onUpdated();
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Perfil atualizado!')),
+              );
+            } catch (_) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Erro ao atualizar perfil')),
+              );
+            } finally {
+              setState(() => isLoading = false);
+            }
+          }
+
+          return AlertDialog(
+            title: const Text('Editar Perfil'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nome',
+                      hintText: 'Seu nome',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: bioController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Bio',
+                      hintText: 'Conte um pouco sobre você',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isLoading ? null : () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: isLoading ? null : handleSave,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFA8C3B0),
+                ),
+                child: isLoading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Salvar'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
