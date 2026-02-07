@@ -1,88 +1,219 @@
+import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
-import '../models/audio_model.dart';
+import '../services/user_service.dart';
+import '../services/device_service.dart';
+import 'register_page.dart';
 
-class UserService {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseFunctions _functions = FirebaseFunctions.instance;
+class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
 
-  // ================= CREATE USER IF NOT EXISTS =================
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
 
-  Future<void> createUserIfNotExists({
-    required String name,
-    required String email,
-    required String deviceId,
-  }) async {
-    final user = _auth.currentUser;
-    if (user == null) return;
+class _LoginPageState extends State<LoginPage> {
+  final emailCtrl = TextEditingController();
+  final passCtrl = TextEditingController();
 
-    final doc = _firestore.collection("users").doc(user.uid);
-    final snap = await doc.get();
+  bool loading = false;
+  String? error;
 
-    if (snap.exists) return;
+  @override
+  void dispose() {
+    emailCtrl.dispose();
+    passCtrl.dispose();
+    super.dispose();
+  }
 
-    await doc.set({
-      "uid": user.uid,
-      "name": name,
-      "email": email,
-      "deviceId": deviceId,
-      "createdAt": FieldValue.serverTimestamp(),
-      "basePlan": "gratis", // gratis | basico
-      "addons": [], // maternidade, luto, etc
+  String _mapAuthError(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'wrong-password':
+        return 'Senha incorreta.';
+      case 'user-not-found':
+        return 'Esse e-mail NÃO está cadastrado.';
+      case 'invalid-email':
+        return 'E-mail inválido.';
+      case 'user-disabled':
+        return 'Conta desativada.';
+      case 'too-many-requests':
+        return 'Muitas tentativas. Tente mais tarde.';
+      default:
+        return 'Erro ao fazer login.';
+    }
+  }
+
+  // ================= LOGIN EMAIL =================
+
+  Future<void> loginEmail() async {
+    if (!mounted) return;
+    setState(() {
+      loading = true;
+      error = null;
     });
-  }
-
-  // ================= SIGN OUT =================
-
-  Future<void> signOut() async {
-    await _auth.signOut();
-  }
-
-  // ================= AUDIO ACCESS CHECK =================
-
-  Future<bool> canAccessAudio(AudioModel audio) async {
-    final user = _auth.currentUser;
-    if (user == null) return false;
-
-    final doc = await _firestore.collection("users").doc(user.uid).get();
-    if (!doc.exists) return false;
-
-    final data = doc.data()!;
-    final base = data["basePlan"] ?? "gratis";
-    final addons = List<String>.from(data["addons"] ?? []);
-
-    // grátis não pode premium
-    if (audio.requiredBase == "basico" && base != "basico") {
-      return false;
-    }
-
-    // addon específico
-    if (audio.requiredAddon.isNotEmpty && !addons.contains(audio.requiredAddon)) {
-      return false;
-    }
-
-    return true;
-  }
-
-  // ================= DELETE ACCOUNT (PLAY STORE COMPLIANT) =================
-
-  Future<void> deleteAccount() async {
-    final user = _auth.currentUser;
-    if (user == null) return;
-
-    print("🧠 DELETE_ACCOUNT -> UID: ${user.uid}");
 
     try {
-      final callable = _functions.httpsCallable('deleteUserData');
-      await callable();
+      final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: emailCtrl.text.trim(),
+        password: passCtrl.text.trim(),
+      );
 
-      print("✅ DELETE_ACCOUNT -> Cloud Function OK");
-    } catch (e) {
-      print("❌ DELETE_ACCOUNT -> Cloud Function ERROR: $e");
-      rethrow;
+      final user = cred.user;
+      if (user == null) throw Exception('Login falhou');
+
+      final deviceId = await DeviceService.getDeviceId();
+      await UserService().createUserIfNotExists(
+        name: user.displayName ?? '',
+        email: user.email ?? '',
+        deviceId: deviceId,
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() => error = _mapAuthError(e));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => error = 'Erro inesperado.');
     }
+
+    if (!mounted) return;
+    setState(() => loading = false);
+  }
+
+  // ================= GOOGLE LOGIN =================
+
+  Future<void> loginGoogle() async {
+    if (!mounted) return;
+    setState(() {
+      loading = true;
+      error = null;
+    });
+
+    try {
+      final googleSignIn = GoogleSignIn();
+      final googleUser = await googleSignIn.signIn();
+
+      if (googleUser == null) {
+        setState(() => loading = false);
+        return;
+      }
+
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      final cred =
+          await FirebaseAuth.instance.signInWithCredential(credential);
+
+      final user = cred.user;
+      if (user == null) throw Exception('Google login falhou');
+
+      final deviceId = await DeviceService.getDeviceId();
+      await UserService().createUserIfNotExists(
+        name: user.displayName ?? '',
+        email: user.email ?? '',
+        deviceId: deviceId,
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() => error = _mapAuthError(e));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => error = 'Erro ao entrar com Google.');
+    }
+
+    if (!mounted) return;
+    setState(() => loading = false);
+  }
+
+  // ================= UI =================
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFA8C3B0),
+      body: Center(
+        child: SingleChildScrollView(
+          child: Container(
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFE6D8),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Entrar',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+
+                TextField(
+                  controller: emailCtrl,
+                  decoration: const InputDecoration(labelText: 'Email'),
+                ),
+
+                const SizedBox(height: 8),
+
+                TextField(
+                  controller: passCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Senha'),
+                ),
+
+                const SizedBox(height: 16),
+
+                if (error != null)
+                  Text(
+                    error!,
+                    style: const TextStyle(color: Colors.red),
+                    textAlign: TextAlign.center,
+                  ),
+
+                const SizedBox(height: 8),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: loading ? null : loginEmail,
+                    child: loading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Entrar'),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: loading ? null : loginGoogle,
+                    child: const Text('Entrar com Google'),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                TextButton(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const RegisterPage()),
+                  ),
+                  child: const Text('Criar conta'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
