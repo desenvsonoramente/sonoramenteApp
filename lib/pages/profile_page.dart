@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/auth_service.dart';
 import '../pages/login_page.dart';
+import '../pages/reauth_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -24,8 +25,15 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
+    // 🔐 Se não logado, manda para login (NÃO retorna shrink)
     if (user == null) {
-      return const SizedBox.shrink();
+      Future.microtask(() {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+          (_) => false,
+        );
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
@@ -52,17 +60,9 @@ class _ProfilePageState extends State<ProfilePage> {
                 children: [
                   Text(
                     user.displayName ?? 'Usuário',
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
-                    ),
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
-                  Text(
-                    user.email ?? '',
-                    style: const TextStyle(color: Colors.black54),
-                  ),
-
+                  Text(user.email ?? '', style: const TextStyle(color: Colors.black54)),
                   const SizedBox(height: 32),
 
                   ElevatedButton(
@@ -81,7 +81,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.red,
-                      foregroundColor: Colors.black,
+                      foregroundColor: Colors.white,
                     ),
                     onPressed: confirmDeleteAccount,
                     child: const Text('Excluir conta'),
@@ -95,7 +95,7 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // ================= POLÍTICA =================
+  // ================= PRIVACY =================
 
   Future<void> _openPrivacyPolicy() async {
     try {
@@ -105,21 +105,14 @@ class _ProfilePageState extends State<ProfilePage> {
       );
 
       if (!mounted) return;
-
-      if (!launched) {
-        _showSnackBar(
-          'Não foi possível abrir a Política de Privacidade',
-        );
-      }
+      if (!launched) _showSnackBar('Não foi possível abrir a Política de Privacidade');
     } catch (_) {
       if (!mounted) return;
-      _showSnackBar(
-        'Não foi possível abrir a Política de Privacidade',
-      );
+      _showSnackBar('Erro ao abrir política de privacidade');
     }
   }
 
-  // ================= EXCLUIR CONTA =================
+  // ================= CONFIRM DELETE =================
 
   void confirmDeleteAccount() {
     showDialog(
@@ -127,47 +120,72 @@ class _ProfilePageState extends State<ProfilePage> {
       builder: (_) => AlertDialog(
         title: const Text('Excluir conta'),
         content: const Text(
-          'Essa ação é permanente. Todos os seus dados serão apagados.',
+          'Essa ação é permanente.\nTodos os seus dados serão apagados.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Não'),
+            child: const Text('Cancelar'),
           ),
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
               await deleteAccount();
             },
-            child: const Text('Sim'),
+            child: const Text('Excluir'),
           ),
         ],
       ),
     );
   }
 
+  // ================= DELETE ACCOUNT =================
+
   Future<void> deleteAccount() async {
     try {
       await AuthService.deleteAccount();
 
       if (!mounted) return;
-
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginPage()),
-        (_) => false,
-      );
-    } catch (_) {
+      _goToLogin();
+    } on FirebaseAuthException catch (e) {
       if (!mounted) return;
 
-      _showSnackBar(
-        'Faça login novamente para excluir a conta',
-      );
+      // 🔐 Precisa reauth
+      if (e.code == 'requires-recent-login') {
+        _showSnackBar('Confirme sua identidade para excluir a conta');
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ReauthPage(
+              onSuccess: () async {
+                await AuthService.deleteAccount();
+                if (!mounted) return;
+                _goToLogin();
+              },
+            ),
+          ),
+        );
+      } else {
+        _showSnackBar('Erro ao excluir: ${e.message}');
+      }
+    } catch (_) {
+      if (!mounted) return;
+      _showSnackBar('Erro desconhecido ao excluir conta');
     }
   }
 
-  // ================= AUX =================
+  void _goToLogin() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (_) => false,
+    );
+  }
+
+  // ================= UI UTILS =================
 
   void _showSnackBar(String message) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );

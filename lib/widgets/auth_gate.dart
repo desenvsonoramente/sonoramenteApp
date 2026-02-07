@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 import '../pages/login_page.dart';
 import '../pages/home_page.dart';
 
@@ -11,15 +12,19 @@ class AuthGate extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
+        // ⏳ Firebase inicializando
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
+
+        // ❌ Não autenticado
         if (!snapshot.hasData) {
           return const LoginPage();
         }
-        // ✅ LOGADO → HOME (NUNCA Profile)
+
+        // ✅ Autenticado (NÃO valida Firestore aqui)
         return const HomePage();
       },
     );

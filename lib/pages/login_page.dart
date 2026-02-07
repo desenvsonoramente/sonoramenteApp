@@ -20,26 +20,36 @@ class _LoginPageState extends State<LoginPage> {
   bool loading = false;
   String? error;
 
+  @override
+  void dispose() {
+    emailCtrl.dispose();
+    passCtrl.dispose();
+    super.dispose();
+  }
+
+  // ================= ERROR MAP =================
+
   String _mapAuthError(FirebaseAuthException e) {
     switch (e.code) {
       case 'wrong-password':
         return 'Senha incorreta.';
       case 'user-not-found':
-        return 'Nenhuma conta encontrada para esse e-mail.';
+        return 'Esse e-mail NÃO está cadastrado.';
       case 'invalid-email':
         return 'E-mail inválido.';
       case 'user-disabled':
-        return 'Essa conta foi desativada.';
+        return 'Conta desativada.';
       case 'too-many-requests':
-        return 'Muitas tentativas. Tente novamente mais tarde.';
-      case 'invalid-credential':
-        return 'E-mail ou senha incorretos.';
+        return 'Muitas tentativas. Tente mais tarde.';
       default:
-        return 'Erro ao fazer login. Tente novamente.';
+        return 'Erro ao fazer login.';
     }
   }
 
+  // ================= LOGIN EMAIL =================
+
   Future<void> loginEmail() async {
+    if (!mounted) return;
     setState(() {
       loading = true;
       error = null;
@@ -52,38 +62,56 @@ class _LoginPageState extends State<LoginPage> {
       );
 
       final user = cred.user;
-      if (user != null) {
-        final deviceId = await DeviceService.getDeviceId();
-        await UserService().createUserIfNotExists(
-          name: user.displayName ?? '',
-          email: user.email ?? '',
-          deviceId: deviceId,
-        );
-      }
+      if (user == null) throw Exception('Login falhou');
+
+      final deviceId = await DeviceService.getDeviceId();
+      await UserService().createUserIfNotExists(
+        name: user.displayName ?? '',
+        email: user.email ?? '',
+        deviceId: deviceId,
+      );
     } on FirebaseAuthException catch (e) {
-      setState(() {
-        error = _mapAuthError(e);
-      });
+      if (!mounted) return;
+      setState(() => error = _mapAuthError(e));
     } catch (_) {
-      setState(() {
-        error = 'Erro inesperado. Tente novamente.';
-      });
+      if (!mounted) return;
+      setState(() => error = 'Erro inesperado.');
     }
 
+    if (!mounted) return;
     setState(() => loading = false);
   }
 
+  // ================= LOGIN GOOGLE (SEM AUTO-CADASTRO) =================
+
   Future<void> loginGoogle() async {
+    if (!mounted) return;
     setState(() {
       loading = true;
       error = null;
     });
 
     try {
-      final googleUser = await GoogleSignIn().signIn();
+      final googleSignIn = GoogleSignIn();
+      final googleUser = await googleSignIn.signIn();
+
       if (googleUser == null) {
         setState(() => loading = false);
         return;
+      }
+
+      final email = googleUser.email;
+
+      // 🔒 BLOQUEIA SE NÃO EXISTIR NO AUTH
+      final methods = await FirebaseAuth.instance
+          .fetchSignInMethodsForEmail(email);
+
+      if (methods.isEmpty) {
+        await googleSignIn.signOut();
+        throw FirebaseAuthException(
+          code: 'user-not-found',
+          message: 'Esse e-mail não está cadastrado.',
+        );
       }
 
       final googleAuth = await googleUser.authentication;
@@ -92,29 +120,31 @@ class _LoginPageState extends State<LoginPage> {
         idToken: googleAuth.idToken,
       );
 
-      final cred = await FirebaseAuth.instance.signInWithCredential(credential);
-      final user = cred.user;
+      final cred =
+          await FirebaseAuth.instance.signInWithCredential(credential);
 
-      if (user != null) {
-        final deviceId = await DeviceService.getDeviceId();
-        await UserService().createUserIfNotExists(
-          name: user.displayName ?? '',
-          email: user.email ?? '',
-          deviceId: deviceId,
-        );
-      }
+      final user = cred.user;
+      if (user == null) throw Exception('Google login falhou');
+
+      final deviceId = await DeviceService.getDeviceId();
+      await UserService().createUserIfNotExists(
+        name: user.displayName ?? '',
+        email: user.email ?? '',
+        deviceId: deviceId,
+      );
     } on FirebaseAuthException catch (e) {
-      setState(() {
-        error = _mapAuthError(e);
-      });
+      if (!mounted) return;
+      setState(() => error = _mapAuthError(e));
     } catch (_) {
-      setState(() {
-        error = 'Erro ao entrar com Google.';
-      });
+      if (!mounted) return;
+      setState(() => error = 'Erro ao entrar com Google.');
     }
 
+    if (!mounted) return;
     setState(() => loading = false);
   }
+
+  // ================= UI =================
 
   @override
   Widget build(BuildContext context) {
@@ -134,30 +164,34 @@ class _LoginPageState extends State<LoginPage> {
               children: [
                 const Text(
                   'Entrar',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 16),
+
                 TextField(
                   controller: emailCtrl,
                   decoration: const InputDecoration(labelText: 'Email'),
                 ),
+
                 const SizedBox(height: 8),
+
                 TextField(
                   controller: passCtrl,
                   obscureText: true,
                   decoration: const InputDecoration(labelText: 'Senha'),
                 ),
+
                 const SizedBox(height: 16),
+
                 if (error != null)
                   Text(
                     error!,
                     style: const TextStyle(color: Colors.red),
                     textAlign: TextAlign.center,
                   ),
+
                 const SizedBox(height: 8),
+
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -171,7 +205,9 @@ class _LoginPageState extends State<LoginPage> {
                         : const Text('Entrar'),
                   ),
                 ),
+
                 const SizedBox(height: 12),
+
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
@@ -179,16 +215,14 @@ class _LoginPageState extends State<LoginPage> {
                     child: const Text('Entrar com Google'),
                   ),
                 ),
+
                 const SizedBox(height: 16),
+
                 TextButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const RegisterPage(),
-                      ),
-                    );
-                  },
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const RegisterPage()),
+                  ),
                   child: const Text('Criar conta'),
                 ),
               ],

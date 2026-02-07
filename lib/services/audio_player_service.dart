@@ -2,6 +2,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../models/audio_model.dart';
 import '../services/user_service.dart';
 import '../pages/premium_page.dart';
 
@@ -40,17 +41,15 @@ class AudioPlayerService {
 
   // ================= PLAY =================
   Future<void> play({
-    required String url,
-    required bool isFreeAudio,
+    required AudioModel audio,
     required BuildContext context,
   }) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
-
       if (user == null) return;
 
       final canAccess =
-          await _userService.canAccessAudio(isFreeAudio: isFreeAudio);
+          await _userService.canAccessAudio(audio: audio);
 
       if (!canAccess) {
         if (!context.mounted) return;
@@ -65,8 +64,8 @@ class AudioPlayerService {
 
       // 🔁 evita recarregar o mesmo áudio
       if (_player.audioSource == null ||
-          _player.audioSource.toString() != url) {
-        await _player.setUrl(url);
+          _player.audioSource.toString() != audio.audioUrl) {
+        await _player.setUrl(audio.audioUrl);
       }
 
       await _player.play();

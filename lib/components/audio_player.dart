@@ -44,7 +44,11 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
   }
 
   Future<void> _init() async {
-    await _player.setUrl(widget.audio.audioUrl);
+    try {
+      await _player.setUrl(widget.audio.audioUrl);
+    } catch (_) {
+      return;
+    }
 
     _player.durationStream.listen((d) {
       if (!mounted || d == null) return;
@@ -59,10 +63,9 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
     _player.playerStateStream.listen((state) {
       if (!mounted) return;
 
-      final playing = state.playing;
-      setState(() => isPlaying = playing);
+      setState(() => isPlaying = state.playing);
 
-      if (playing) {
+      if (state.playing) {
         _pulseController.repeat(reverse: true);
       } else {
         _pulseController.stop();
@@ -71,7 +74,9 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
     });
 
     await _player.setVolume(volume);
-    await _player.play();
+    if (mounted) {
+      await _player.play();
+    }
   }
 
   String _format(Duration d) {
@@ -95,7 +100,6 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
       body: SafeArea(
         child: Column(
           children: [
-            // HEADER
             Padding(
               padding: const EdgeInsets.only(top: 10, bottom: 5),
               child: Column(
@@ -107,23 +111,19 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
                       onPressed: () => Navigator.pop(context),
                     ),
                   ),
-                  Center(
-                    child: Image.asset(
-                      'assets/images/sonoramente_logo_branco.png',
-                      height: 200,
-                      fit: BoxFit.contain,
-                    ),
+                  Image.asset(
+                    'assets/images/sonoramente_logo_branco.png',
+                    height: 200,
+                    fit: BoxFit.contain,
                   ),
                 ],
               ),
             ),
-
-            // VISUAL REATIVO
             Expanded(
               child: Center(
                 child: AnimatedBuilder(
                   animation: _pulseController,
-                  builder: (_, _) {
+                  builder: (_, __) {
                     return Transform.scale(
                       scale: _pulseController.value,
                       child: Container(
@@ -146,8 +146,6 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
                 ),
               ),
             ),
-
-            // TÍTULO
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Text(
@@ -159,10 +157,7 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
                 ),
               ),
             ),
-
             const SizedBox(height: 24),
-
-            // PROGRESSO
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Column(
@@ -175,11 +170,14 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
                         .toDouble()
                         .clamp(0, duration.inSeconds.toDouble()),
                     onChanged: (v) {
-                      _player.seek(Duration(seconds: v.toInt()));
+                      _player.seek(
+                        Duration(seconds: v.toInt()),
+                      );
                     },
                   ),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisAlignment:
+                        MainAxisAlignment.spaceBetween,
                     children: [
                       Text(_format(position)),
                       Text(_format(duration)),
@@ -188,10 +186,7 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
                 ],
               ),
             ),
-
             const SizedBox(height: 16),
-
-            // VOLUME
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32),
               child: Row(
@@ -213,21 +208,21 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
                 ],
               ),
             ),
-
             const SizedBox(height: 12),
-
-            // CONTROLES
             IconButton(
               iconSize: 64,
               color: appGreen,
               icon: Icon(
-                isPlaying ? Icons.pause_circle : Icons.play_circle,
+                isPlaying
+                    ? Icons.pause_circle
+                    : Icons.play_circle,
               ),
               onPressed: () {
-                isPlaying ? _player.pause() : _player.play();
+                isPlaying
+                    ? _player.pause()
+                    : _player.play();
               },
             ),
-
             const SizedBox(height: 40),
           ],
         ),

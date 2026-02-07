@@ -2,7 +2,7 @@ name: sonoramente
 description: "Um aplicativo de cuidado emocional em áudio."
 publish_to: 'none'
 
-version: 1.0.7+8
+version: 1.0.12+13
 
 environment:
   sdk: ^3.10.7

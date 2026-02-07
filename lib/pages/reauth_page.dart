@@ -23,6 +23,14 @@ class _ReauthPageState extends State<ReauthPage> {
   String? error;
 
   @override
+  void initState() {
+    super.initState();
+
+    final user = FirebaseAuth.instance.currentUser;
+    emailCtrl.text = user?.email ?? '';
+  }
+
+  @override
   void dispose() {
     emailCtrl.dispose();
     passCtrl.dispose();
@@ -31,8 +39,6 @@ class _ReauthPageState extends State<ReauthPage> {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Confirmar identidade'),
@@ -50,7 +56,7 @@ class _ReauthPageState extends State<ReauthPage> {
 
             // EMAIL (somente leitura)
             TextField(
-              controller: emailCtrl..text = user?.email ?? '',
+              controller: emailCtrl,
               readOnly: true,
               decoration: const InputDecoration(labelText: 'Email'),
             ),
@@ -76,7 +82,11 @@ class _ReauthPageState extends State<ReauthPage> {
             ElevatedButton(
               onPressed: loading ? null : reauthenticate,
               child: loading
-                  ? const CircularProgressIndicator()
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Text('Confirmar'),
             ),
           ],
@@ -106,9 +116,9 @@ class _ReauthPageState extends State<ReauthPage> {
       setState(() {
         error = e.message ?? 'Erro ao autenticar';
       });
-    } catch (_) {
+    } catch (e) {
       setState(() {
-        error = 'Erro inesperado';
+        error = 'Erro inesperado: $e';
       });
     } finally {
       if (mounted) {

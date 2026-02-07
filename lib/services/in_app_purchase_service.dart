@@ -1,29 +1,34 @@
 import 'dart:async';
+
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class InAppPurchaseService {
   final InAppPurchase _iap = InAppPurchase.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFunctions _functions = FirebaseFunctions.instance;
 
   StreamSubscription<List<PurchaseDetails>>? _subscription;
   bool _initialized = false;
 
-  static const String basicId = 'plano_basico';
+  /// PLANO BÁSICO (compra única)
+  static const String basicProductId = 'pacote_premium';
 
-  static const Map<String, String> addonMap = {
-    'addon_maternidade': 'maternidade',
-    'addon_luto': 'luto',
-    'addon_ansiedade': 'ansiedade',
-    'addon_foco': 'foco',
+  /// ADDONS (futuro)
+  static const Set<String> addonProductIds = {
+    'addon_maternidade',
+    'addon_luto',
+    'addon_ansiedade',
+    'addon_foco',
   };
 
   final StreamController<String> _successController =
-      StreamController.broadcast();
+      StreamController<String>.broadcast();
   final StreamController<String> _errorController =
-      StreamController.broadcast();
+      StreamController<String>.broadcast();
 
   Stream<String> get onSuccess => _successController.stream;
   Stream<String> get onError => _errorController.stream;
@@ -59,8 +64,8 @@ class InAppPurchaseService {
 
   Future<List<ProductDetails>> loadProducts() async {
     final ids = <String>{
-      basicId,
-      ...addonMap.keys,
+      basicProductId,
+      ...addonProductIds,
     };
 
     final response = await _iap.queryProductDetails(ids);
@@ -99,13 +104,13 @@ class InAppPurchaseService {
     for (final purchase in purchases) {
       if (purchase.status == PurchaseStatus.purchased ||
           purchase.status == PurchaseStatus.restored) {
-        final delivered = await _deliverPurchase(purchase);
+        final claimed = await _claimPurchase(purchase);
 
         if (purchase.pendingCompletePurchase) {
           await _iap.completePurchase(purchase);
         }
 
-        if (delivered) {
+        if (claimed) {
           _successController.add(
             purchase.status == PurchaseStatus.restored
                 ? 'Compra restaurada com sucesso!'
@@ -126,46 +131,25 @@ class InAppPurchaseService {
     }
   }
 
-  // ================= DELIVERY =================
+  // ================= CLAIM (BACKEND) =================
 
-  Future<bool> _deliverPurchase(PurchaseDetails purchase) async {
+  Future<bool> _claimPurchase(PurchaseDetails purchase) async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return false;
 
-    final ref = _firestore.collection('users').doc(uid);
-    final snap = await ref.get();
-    final data = snap.data() ?? {};
+    try {
+      final callable = _functions.httpsCallable('claimPurchase');
 
-    // PLANO BÁSICO (COMPRA ÚNICA)
-    if (purchase.productID == basicId) {
-      if (data['basePlan'] == 'basico') {
-        return false; // já entregue
-      }
+      final result = await callable.call({
+        'productId': purchase.productID,
+        'purchaseToken': purchase.verificationData.serverVerificationData,
+        'platform': purchase.verificationData.source, // android / ios
+      });
 
-      await ref.set(
-        {'basePlan': 'basico'},
-        SetOptions(merge: true),
-      );
-      return true;
+      return result.data != null && result.data['success'] == true;
+    } catch (e) {
+      _errorController.add('Falha ao validar a compra.');
+      return false;
     }
-
-    // ADDONS
-    if (addonMap.containsKey(purchase.productID)) {
-      final addons = List<String>.from(data['addons'] ?? []);
-
-      if (addons.contains(addonMap[purchase.productID])) {
-        return false;
-      }
-
-      await ref.set({
-        'addons': FieldValue.arrayUnion(
-          [addonMap[purchase.productID]],
-        ),
-      }, SetOptions(merge: true));
-
-      return true;
-    }
-
-    return false;
   }
 }
