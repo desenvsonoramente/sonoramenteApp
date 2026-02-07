@@ -46,14 +46,18 @@ class _PremiumPageState extends State<PremiumPage> {
   void _listenFeedback() {
     service.onSuccess.listen((msg) async {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.green));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: Colors.green),
+      );
       await _loadData();
       if (mounted) setState(() => purchasing = false);
     });
 
     service.onError.listen((msg) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: Colors.red),
+      );
       if (mounted) setState(() => purchasing = false);
     });
   }
@@ -78,7 +82,9 @@ class _PremiumPageState extends State<PremiumPage> {
     } catch (_) {
       if (!mounted) return;
       setState(() => purchasing = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Falha ao iniciar pagamento.'), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Falha ao iniciar pagamento.'), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -103,7 +109,13 @@ class _PremiumPageState extends State<PremiumPage> {
       padding: const EdgeInsets.all(16),
       children: [
         const SizedBox(height: 8),
-        Center(child: Image.asset('assets/images/sonoramente_logo_branco.png', height: 200, fit: BoxFit.contain)),
+        Center(
+          child: Image.asset(
+            'assets/images/sonoramente_logo_branco.png',
+            height: 200,
+            fit: BoxFit.contain,
+          ),
+        ),
         const SizedBox(height: 12),
         const Text(
           'Pague uma única vez e desbloqueie todos os áudios',
@@ -116,7 +128,13 @@ class _PremiumPageState extends State<PremiumPage> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(28),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 12, offset: const Offset(0, 6))],
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
           child: Column(
             children: [
@@ -135,12 +153,22 @@ class _PremiumPageState extends State<PremiumPage> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                   ),
                   child: purchasing
-                      ? const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                          SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-                          SizedBox(width: 12),
-                          Text('Processando...'),
-                        ])
-                      : Text(hasBasic ? 'Plano ativo' : 'Desbloquear agora', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.black)),
+                      ? const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            ),
+                            SizedBox(width: 12),
+                            Text('Processando...'),
+                          ],
+                        )
+                      : Text(
+                          hasBasic ? 'Plano ativo' : 'Desbloquear agora',
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.black),
+                        ),
                 ),
               ),
             ],
@@ -164,7 +192,10 @@ class _PremiumPageState extends State<PremiumPage> {
           Container(
             width: 40,
             height: 40,
-            decoration: BoxDecoration(color: const Color(0xFFA8C3B0).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(
+              color: const Color(0xFFA8C3B0).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
             child: Icon(icon, color: const Color(0xFFA8C3B0)),
           ),
           const SizedBox(width: 12),
@@ -175,6 +206,11 @@ class _PremiumPageState extends State<PremiumPage> {
   }
 
   Widget _buildLoading() {
-    return Container(color: Colors.black45, child: const Center(child: CircularProgressIndicator(color: Colors.white)));
+    return Container(
+      color: Colors.black45,
+      child: const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      ),
+    );
   }
 }

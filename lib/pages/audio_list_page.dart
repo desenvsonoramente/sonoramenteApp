@@ -40,8 +40,7 @@ class _AudioListPageState extends State<AudioListPage> {
           .get();
 
       final audios = query.docs
-          .map((d) =>
-              AudioModel.fromMap(d.id, d.data() as Map<String, dynamic>))
+          .map((d) => AudioModel.fromMap(d.id, d.data()))
           .toList();
 
       // 🔹 Grátis sempre no topo
@@ -120,8 +119,7 @@ class _AudioListPageState extends State<AudioListPage> {
                             context,
                             MaterialPageRoute(
                               fullscreenDialog: true,
-                              builder: (_) =>
-                                  AudioPlayerModal(audio: audio),
+                              builder: (_) => AudioPlayerModal(audio: audio),
                             ),
                           );
                         },
@@ -143,33 +141,27 @@ class _AudioListPageState extends State<AudioListPage> {
                             children: [
                               Expanded(
                                 child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       audio.title,
                                       style: TextStyle(
-                                        fontWeight:
-                                            isFree ? FontWeight.bold : null,
+                                        fontWeight: isFree ? FontWeight.bold : null,
                                         fontSize: 16,
                                       ),
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
                                       audio.description,
-                                      style:
-                                          const TextStyle(fontSize: 14),
+                                      style: const TextStyle(fontSize: 14),
                                     ),
                                   ],
                                 ),
                               ),
-                              if (isFree)
-                                _badge('GRÁTIS', Colors.green),
+                              if (isFree) _badge('GRÁTIS', Colors.green),
                               const SizedBox(width: 8),
                               Icon(
-                                locked
-                                    ? Icons.lock_outline
-                                    : Icons.play_arrow,
+                                locked ? Icons.lock_outline : Icons.play_arrow,
                               ),
                             ],
                           ),
