@@ -12,7 +12,7 @@ class UserService {
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseFunctions _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+  final FirebaseFunctions _functions = FirebaseFunctions.instance;
 
   Map<String, dynamic>? _cachedUser;
   DateTime? _fetchedAt;
@@ -142,6 +142,32 @@ class UserService {
   }
 
   // =====================================================
+  // ================== LOGIN ÚNICO =======================
+  // =====================================================
+
+  /// ✅ Deve ser chamado SEMPRE após login (email ou google).
+  /// Atualiza o deviceIdAtivo do usuário, garantindo "login único".
+  Future<void> setActiveDevice({required String deviceId}) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      print("❌ SET_ACTIVE_DEVICE -> NO USER");
+      return;
+    }
+
+    final uid = user.uid;
+    final ref = _firestore.collection('users').doc(uid);
+
+    print("🧠 SET_ACTIVE_DEVICE -> UID=$uid DEVICE=$deviceId");
+
+    await ref.set({
+      'deviceIdAtivo': deviceId,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    clearCache();
+  }
+
+  // =====================================================
   // ================== DELETE ACCOUNT ====================
   // =====================================================
 
@@ -179,11 +205,12 @@ class UserService {
   // ================== SIGN OUT ===========================
   // =====================================================
 
-  Future<void> signOut() async {
-    print("🧠 SIGN_OUT");
-    clearCache();
-    await _auth.signOut();
-  }
+Future<void> signOut() async {
+  print("🧠 SIGN_OUT");
+  print("🧠 SIGN_OUT -> STACKTRACE:\n${StackTrace.current}");
+  clearCache();
+  await _auth.signOut();
+}
 
   // =====================================================
   // ================== PUBLIC =============================

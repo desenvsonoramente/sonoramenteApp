@@ -39,15 +39,6 @@ class _LoginPageState extends State<LoginPage> {
         return 'Conta desativada.';
       case 'too-many-requests':
         return 'Muitas tentativas. Tente mais tarde.';
-
-      // ✅ Firebase moderno pode devolver isso p/ user inexistente OU senha errada
-      case 'invalid-credential':
-        return 'E-mail ou senha inválidos.';
-      case 'invalid-login-credentials':
-        return 'E-mail ou senha inválidos.';
-      case 'INVALID_LOGIN_CREDENTIALS':
-        return 'E-mail ou senha inválidos.';
-
       default:
         return 'Erro ao fazer login.';
     }
@@ -56,43 +47,40 @@ class _LoginPageState extends State<LoginPage> {
   // ================= LOGIN EMAIL =================
 
   Future<void> loginEmail() async {
+    print("🧠 LOGIN_EMAIL -> CLICK");
+    print(
+      "🧠 LOGIN_EMAIL -> EMAIL=${emailCtrl.text.trim()} | PASS_LEN=${passCtrl.text.trim().length}",
+    );
+
     if (!mounted) return;
     setState(() {
       loading = true;
       error = null;
     });
 
-    final email = emailCtrl.text.trim();
-    final password = passCtrl.text.trim();
-
     try {
-      // ✅ Checagem antes do login para mostrar "não cadastrado"
-      // (evita cair em invalid-credential e não saber o motivo)
-      final methods =
-          await FirebaseAuth.instance.fetchSignInMethodsForEmail(email);
-
-      if (methods.isEmpty) {
-        if (!mounted) return;
-        setState(() {
-          error = 'Esse e-mail NÃO está cadastrado.';
-        });
-        return;
-      }
-
       final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: email,
-        password: password,
+        email: emailCtrl.text.trim(),
+        password: passCtrl.text.trim(),
       );
 
       final user = cred.user;
       if (user == null) throw Exception('Login falhou');
 
+      print("🧠 LOGIN_EMAIL -> SIGN IN OK | UID=${user.uid}");
+
       final deviceId = await DeviceService.getDeviceId();
+
       await UserService().createUserIfNotExists(
         name: user.displayName ?? '',
         email: user.email ?? '',
         deviceId: deviceId,
       );
+
+      // ✅ LOGIN ÚNICO: sempre atualiza o deviceIdAtivo
+      print("🧠 LOGIN_EMAIL -> SET_ACTIVE_DEVICE -> $deviceId");
+      await UserService().setActiveDevice(deviceId: deviceId);
+      print("✅ LOGIN_EMAIL -> SET_ACTIVE_DEVICE OK");
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -104,6 +92,7 @@ class _LoginPageState extends State<LoginPage> {
         error = 'Erro inesperado.';
       });
     } finally {
+      print("🧠 LOGIN_EMAIL -> FINALLY");
       if (!mounted) return;
       setState(() {
         loading = false;
@@ -138,18 +127,23 @@ class _LoginPageState extends State<LoginPage> {
         idToken: googleAuth.idToken,
       );
 
-      final cred =
-          await FirebaseAuth.instance.signInWithCredential(credential);
+      final cred = await FirebaseAuth.instance.signInWithCredential(credential);
 
       final user = cred.user;
       if (user == null) throw Exception('Google login falhou');
 
       final deviceId = await DeviceService.getDeviceId();
+
       await UserService().createUserIfNotExists(
         name: user.displayName ?? '',
         email: user.email ?? '',
         deviceId: deviceId,
       );
+
+      // ✅ LOGIN ÚNICO: sempre atualiza o deviceIdAtivo
+      print("🧠 LOGIN_GOOGLE -> SET_ACTIVE_DEVICE -> $deviceId");
+      await UserService().setActiveDevice(deviceId: deviceId);
+      print("✅ LOGIN_GOOGLE -> SET_ACTIVE_DEVICE OK");
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() {

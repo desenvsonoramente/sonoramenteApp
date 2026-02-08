@@ -4,11 +4,17 @@
     <!-- Cor de fundo do splash -->
     <item android:drawable="@color/splash_bg" />
 
-    <!-- Logo central -->
+    <!-- Logo central (ajuste os inset para controlar o tamanho) -->
     <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@drawable/splash_logo" />
+        <inset
+            android:insetLeft="60dp"
+            android:insetRight="60dp"
+            android:insetTop="220dp"
+            android:insetBottom="220dp">
+            <bitmap
+                android:gravity="center"
+                android:src="@drawable/splash_logo" />
+        </inset>
     </item>
 
 </layer-list>

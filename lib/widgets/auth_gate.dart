@@ -24,7 +24,9 @@ class AuthGate extends StatelessWidget {
           return const LoginPage();
         }
 
-        // ✅ Autenticado (NÃO valida Firestore aqui)
+        // ✅ Autenticado
+        // A validação de "login único" fica no SessionGuard (em main.dart),
+        // para evitar corrida/loop de signOut durante criação/atualização do doc.
         return const HomePage();
       },
     );

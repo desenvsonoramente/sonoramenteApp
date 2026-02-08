@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:screen_protector/screen_protector.dart';
+
 import 'widgets/auth_gate.dart';
+import 'components/session_guard.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,6 +54,13 @@ class _MyAppState extends State<MyApp> {
           surface: appBgColor,
         ),
       ),
+      builder: (context, child) {
+        // ✅ SessionGuard precisa ficar ABAIXO do MaterialApp
+        // para ter ScaffoldMessenger / Navigator disponíveis.
+        return SessionGuard(
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       home: const AuthGate(),
     );
   }
