@@ -2,7 +2,7 @@ name: sonoramente
 description: "Um aplicativo de cuidado emocional em áudio."
 publish_to: 'none'
 
-version: 1.0.16+17
+version: 1.0.17+18
 
 environment:
   sdk: ^3.10.7
@@ -10,6 +10,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
+  # ✅ Versão do app (USADO EM RUNTIME)
+  package_info_plus: ^8.0.0
 
   # Básicos
   http: ^1.2.0
@@ -56,7 +59,6 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.13.1
   uuid: ^4.4.2
-  package_info_plus: ^8.0.0
 
 flutter:
   uses-material-design: true
