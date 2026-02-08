@@ -26,25 +26,17 @@ class UserService {
   Future<bool> canAccessAudio({required AudioModel audio}) async {
     final user = _auth.currentUser;
     if (user == null) {
-      print("❌ AUDIO_ACCESS -> NOT LOGGED");
       return false;
     }
 
     final userData = await _getUserData();
     if (userData == null) {
-      print("❌ AUDIO_ACCESS -> USER DATA NULL");
       return false;
     }
 
     final String plan = userData['plan'] ?? 'gratis';
     final List<String> addons =
         (userData['addons'] as List? ?? []).cast<String>();
-
-    print("🧠 AUDIO_ACCESS -> UID=${user.uid}");
-    print("🧠 AUDIO_ACCESS -> PLAN=$plan");
-    print("🧠 AUDIO_ACCESS -> ADDONS=$addons");
-    print("🧠 AUDIO_ACCESS -> REQUIRED_BASE=${audio.requiredBase}");
-    print("🧠 AUDIO_ACCESS -> REQUIRED_ADDON=${audio.requiredAddon}");
 
     // 🔓 GRÁTIS
     if (audio.requiredBase == 'gratis') return true;
@@ -53,31 +45,24 @@ class UserService {
     final String currentDeviceId = await DeviceService.getDeviceId();
     final String? deviceIdAtivo = userData['deviceIdAtivo'];
 
-    print("🧠 DEVICE CHECK -> CURRENT=$currentDeviceId | ACTIVE=$deviceIdAtivo");
-
     if (deviceIdAtivo == null || deviceIdAtivo != currentDeviceId) {
-      print("❌ AUDIO_ACCESS -> DEVICE BLOCK");
       return false;
     }
 
     // 💎 PLANO BÁSICO
     if (audio.requiredBase == 'basico') {
       if (plan == 'gratis') {
-        print("❌ AUDIO_ACCESS -> PLAN BLOCK");
         return false;
       }
 
       if (audio.requiredAddon.isEmpty) {
-        print("✅ AUDIO_ACCESS -> BASIC OK");
         return true;
       }
 
       if (addons.contains(audio.requiredAddon)) {
-        print("✅ AUDIO_ACCESS -> ADDON OK");
         return true;
       }
 
-      print("❌ AUDIO_ACCESS -> ADDON BLOCK");
       return false;
     }
 
@@ -97,7 +82,6 @@ class UserService {
 
     // 🔥 CRITICAL SECURITY CHECK
     if (user == null) {
-      print('❌ CREATE_USER -> NO AUTH USER');
       return;
     }
 
@@ -105,12 +89,8 @@ class UserService {
     final providers = user.providerData.map((p) => p.providerId).toList();
     final isEmailPassword = providers.contains('password');
 
-    print("🧠 CREATE_USER -> PROVIDERS=$providers");
-    print("🧠 CREATE_USER -> NAME=$name EMAIL=$email");
-
     // ⚠️ Se for email/password, só cria se displayName NÃO for vazio
     if (isEmailPassword && (name.isEmpty && user.displayName == null)) {
-      print('⚠️ CREATE_USER BLOCKED (email login without register)');
       return;
     }
 
@@ -120,11 +100,8 @@ class UserService {
     await _firestore.runTransaction((tx) async {
       final doc = await tx.get(ref);
       if (doc.exists) {
-        print("🧠 CREATE_USER -> ALREADY EXISTS");
         return;
       }
-
-      print("🔥 CREATE_USER -> CREATING FIRESTORE DOC");
 
       tx.set(ref, {
         'uid': uid,
@@ -150,14 +127,11 @@ class UserService {
   Future<void> setActiveDevice({required String deviceId}) async {
     final user = _auth.currentUser;
     if (user == null) {
-      print("❌ SET_ACTIVE_DEVICE -> NO USER");
       return;
     }
 
     final uid = user.uid;
     final ref = _firestore.collection('users').doc(uid);
-
-    print("🧠 SET_ACTIVE_DEVICE -> UID=$uid DEVICE=$deviceId");
 
     await ref.set({
       'deviceIdAtivo': deviceId,
@@ -174,22 +148,12 @@ class UserService {
   Future<void> deleteAccount() async {
     final user = _auth.currentUser;
     if (user == null) {
-      print("❌ DELETE_ACCOUNT -> NO USER");
       return;
     }
 
-    print("🧠 DELETE_ACCOUNT -> UID=${user.uid}");
-
-    try {
-      // 🔹 Chama a Cloud Function segura que apaga Firestore e Auth
-      final callable = _functions.httpsCallable('deleteAccount');
-      await callable();
-
-      print("✅ DELETE_ACCOUNT -> CLOUD FUNCTION OK");
-    } catch (e) {
-      print("❌ DELETE_ACCOUNT -> CLOUD FUNCTION ERROR: $e");
-      rethrow;
-    }
+    // 🔹 Chama a Cloud Function segura que apaga Firestore e Auth
+    final callable = _functions.httpsCallable('deleteAccount');
+    await callable();
   }
 
   // =====================================================
@@ -205,12 +169,10 @@ class UserService {
   // ================== SIGN OUT ===========================
   // =====================================================
 
-Future<void> signOut() async {
-  print("🧠 SIGN_OUT");
-  print("🧠 SIGN_OUT -> STACKTRACE:\n${StackTrace.current}");
-  clearCache();
-  await _auth.signOut();
-}
+  Future<void> signOut() async {
+    clearCache();
+    await _auth.signOut();
+  }
 
   // =====================================================
   // ================== PUBLIC =============================
@@ -233,15 +195,11 @@ Future<void> signOut() async {
     if (_cachedUser != null &&
         _fetchedAt != null &&
         DateTime.now().difference(_fetchedAt!) < _cacheTTL) {
-      print("🧠 USER CACHE HIT");
       return _cachedUser;
     }
 
-    print("🧠 USER CACHE MISS -> FIRESTORE GET");
-
     final snap = await _firestore.collection('users').doc(uid).get();
     if (!snap.exists) {
-      print("❌ USER DOC NOT FOUND IN FIRESTORE");
       return null;
     }
 

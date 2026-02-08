@@ -13,13 +13,7 @@ class AudioPlayerService {
 
   factory AudioPlayerService() => _instance;
 
-  AudioPlayerService._internal() {
-    _player.playerStateStream.listen((state) {
-      debugPrint(
-        "🎧 PlayerState -> playing: ${state.playing}, processing: ${state.processingState}",
-      );
-    });
-  }
+  AudioPlayerService._internal();
 
   // ================= CORE =================
   final AudioPlayer _player = AudioPlayer();
@@ -69,8 +63,8 @@ class AudioPlayerService {
       }
 
       await _player.play();
-    } catch (e) {
-      debugPrint('❌ Erro ao tocar áudio: $e');
+    } catch (_) {
+      // silencioso em produção
     }
   }
 

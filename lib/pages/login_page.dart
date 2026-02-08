@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../services/user_service.dart';
 import '../services/device_service.dart';
@@ -19,6 +20,26 @@ class _LoginPageState extends State<LoginPage> {
 
   bool loading = false;
   String? error;
+
+  String _appVersion = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() {
+        _appVersion = '${info.version} (${info.buildNumber})';
+      });
+    } catch (_) {
+      // se falhar, apenas não mostra
+    }
+  }
 
   @override
   void dispose() {
@@ -47,11 +68,6 @@ class _LoginPageState extends State<LoginPage> {
   // ================= LOGIN EMAIL =================
 
   Future<void> loginEmail() async {
-    print("🧠 LOGIN_EMAIL -> CLICK");
-    print(
-      "🧠 LOGIN_EMAIL -> EMAIL=${emailCtrl.text.trim()} | PASS_LEN=${passCtrl.text.trim().length}",
-    );
-
     if (!mounted) return;
     setState(() {
       loading = true;
@@ -67,8 +83,6 @@ class _LoginPageState extends State<LoginPage> {
       final user = cred.user;
       if (user == null) throw Exception('Login falhou');
 
-      print("🧠 LOGIN_EMAIL -> SIGN IN OK | UID=${user.uid}");
-
       final deviceId = await DeviceService.getDeviceId();
 
       await UserService().createUserIfNotExists(
@@ -77,10 +91,7 @@ class _LoginPageState extends State<LoginPage> {
         deviceId: deviceId,
       );
 
-      // ✅ LOGIN ÚNICO: sempre atualiza o deviceIdAtivo
-      print("🧠 LOGIN_EMAIL -> SET_ACTIVE_DEVICE -> $deviceId");
       await UserService().setActiveDevice(deviceId: deviceId);
-      print("✅ LOGIN_EMAIL -> SET_ACTIVE_DEVICE OK");
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -92,11 +103,11 @@ class _LoginPageState extends State<LoginPage> {
         error = 'Erro inesperado.';
       });
     } finally {
-      print("🧠 LOGIN_EMAIL -> FINALLY");
-      if (!mounted) return;
-      setState(() {
-        loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          loading = false;
+        });
+      }
     }
   }
 
@@ -112,7 +123,6 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final googleSignIn = GoogleSignIn(scopes: ['email']);
 
-      // Forçar escolha de conta
       final signedInUser = await googleSignIn.signInSilently();
       if (signedInUser != null) {
         await googleSignIn.signOut();
@@ -127,7 +137,8 @@ class _LoginPageState extends State<LoginPage> {
         idToken: googleAuth.idToken,
       );
 
-      final cred = await FirebaseAuth.instance.signInWithCredential(credential);
+      final cred =
+          await FirebaseAuth.instance.signInWithCredential(credential);
 
       final user = cred.user;
       if (user == null) throw Exception('Google login falhou');
@@ -140,10 +151,7 @@ class _LoginPageState extends State<LoginPage> {
         deviceId: deviceId,
       );
 
-      // ✅ LOGIN ÚNICO: sempre atualiza o deviceIdAtivo
-      print("🧠 LOGIN_GOOGLE -> SET_ACTIVE_DEVICE -> $deviceId");
       await UserService().setActiveDevice(deviceId: deviceId);
-      print("✅ LOGIN_GOOGLE -> SET_ACTIVE_DEVICE OK");
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -155,10 +163,11 @@ class _LoginPageState extends State<LoginPage> {
         error = 'Erro ao entrar com Google.';
       });
     } finally {
-      if (!mounted) return;
-      setState(() {
-        loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          loading = false;
+        });
+      }
     }
   }
 
@@ -232,6 +241,12 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   child: const Text('Criar conta'),
                 ),
+                const SizedBox(height: 12),
+                if (_appVersion.isNotEmpty)
+                  Text(
+                    'v$_appVersion',
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
               ],
             ),
           ),

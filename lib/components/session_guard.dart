@@ -27,12 +27,12 @@ class _SessionGuardState extends State<SessionGuard> {
 
   bool _kicked = false;
 
-  // ✅ “Arma” o guard só depois de um tempo do login
+  // Grace period após login
   Timer? _armTimer;
   bool _armed = false;
   String? _armedUid;
 
-  // Evita múltiplas confirmações em paralelo
+  // Evita múltiplas confirmações simultâneas
   bool _confirming = false;
 
   static const Duration _graceAfterLogin = Duration(seconds: 4);
@@ -54,68 +54,61 @@ class _SessionGuardState extends State<SessionGuard> {
       _armedUid = null;
       _confirming = false;
 
-      // reset quando desloga
+      // Reset quando desloga
       if (user == null) {
         _kicked = false;
         return;
       }
 
-      // pega deviceId 1x
+      // Obtém deviceId uma única vez
       try {
         _deviceId ??= await _deviceIdFuture!;
-      } catch (e) {
-        debugPrint('❌ SESSION_GUARD -> getDeviceId error: $e');
+      } catch (_) {
         return;
       }
 
-      // ✅ Grace period: não derruba logo após login
+      // Grace period: não derruba logo após login
       _armedUid = user.uid;
       _armTimer = Timer(_graceAfterLogin, () {
         if (!mounted) return;
-        // só arma se ainda é o mesmo user logado
         final current = FirebaseAuth.instance.currentUser;
         if (current?.uid == _armedUid) {
           _armed = true;
-          debugPrint('✅ SESSION_GUARD -> ARMED for uid=${_armedUid}');
         }
       });
 
-      final ref = FirebaseFirestore.instance.collection('users').doc(user.uid);
+      final ref =
+          FirebaseFirestore.instance.collection('users').doc(user.uid);
 
       _userSub = ref.snapshots(
         includeMetadataChanges: true,
       ).listen(
         (snap) async {
-          // Se doc ainda não existe, não derruba.
+          // Se doc ainda não existe, não derruba
           if (!snap.exists) return;
 
           final data = snap.data();
           if (data == null) return;
 
           final active = (data['deviceIdAtivo'] ?? '').toString();
-          final current = (_deviceId ?? '').toString();
+          final current = _deviceId ?? '';
 
-          // Se ainda não tiver ativo, não derruba ninguém
           if (active.isEmpty || current.isEmpty) return;
 
-          // ✅ IMPORTANTE: durante grace period, não chuta.
-          // Deixa o login terminar de setar deviceIdAtivo no Firestore.
-          if (!_armed) {
-            return;
-          }
+          // Durante grace period, não chuta
+          if (!_armed) return;
 
-          // ✅ Ignora eventos só de metadata/cache/pending writes
-          // Queremos agir apenas em dado confirmado.
+          // Ignora cache / pending writes
           if (snap.metadata.isFromCache) return;
           if (snap.metadata.hasPendingWrites) return;
 
-          // Se device ativo mudou para outro aparelho, confirma no servidor antes de chutar
+          // Confirma no servidor antes de chutar
           if (active != current) {
-            await _confirmAndMaybeKick(ref: ref, message: 'Sua conta foi acessada em outro dispositivo.');
+            await _confirmAndMaybeKick(
+              ref: ref,
+              message: 'Sua conta foi acessada em outro dispositivo.',
+            );
           }
-        },
-        onError: (e) {
-          debugPrint('❌ SESSION_GUARD -> Firestore listen error: $e');
         },
       );
     });
@@ -130,25 +123,23 @@ class _SessionGuardState extends State<SessionGuard> {
     _confirming = true;
 
     try {
-      // ✅ Confirma diretamente do servidor (não cache)
-      final serverSnap = await ref.get(const GetOptions(source: Source.server));
+      final serverSnap =
+          await ref.get(const GetOptions(source: Source.server));
       if (!serverSnap.exists) return;
 
       final data = serverSnap.data();
       if (data == null) return;
 
       final active = (data['deviceIdAtivo'] ?? '').toString();
-      final current = (_deviceId ?? '').toString();
+      final current = _deviceId ?? '';
 
       if (active.isEmpty || current.isEmpty) return;
 
-      // Ainda mismatch com dado do servidor => agora sim é real
       if (active != current) {
         await _kickToLogin(message: message);
       }
-    } catch (e) {
-      debugPrint('❌ SESSION_GUARD -> confirm server error: $e');
-      // Se falhou a confirmação, NÃO chuta automaticamente (evita falsos positivos).
+    } catch (_) {
+      // Silencioso por segurança (evita falsos positivos)
     } finally {
       _confirming = false;
     }
@@ -172,9 +163,9 @@ class _SessionGuardState extends State<SessionGuard> {
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger != null) {
       messenger.clearSnackBars();
-      messenger.showSnackBar(SnackBar(content: Text(message)));
-    } else {
-      debugPrint('⚠️ SESSION_GUARD -> $message (sem ScaffoldMessenger)');
+      messenger.showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     }
   }
 

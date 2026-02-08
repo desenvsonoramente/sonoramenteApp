@@ -56,6 +56,7 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.13.1
   uuid: ^4.4.2
+  package_info_plus: ^8.0.0
 
 flutter:
   uses-material-design: true
