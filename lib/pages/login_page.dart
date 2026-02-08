@@ -39,6 +39,15 @@ class _LoginPageState extends State<LoginPage> {
         return 'Conta desativada.';
       case 'too-many-requests':
         return 'Muitas tentativas. Tente mais tarde.';
+
+      // ✅ Firebase moderno pode devolver isso p/ user inexistente OU senha errada
+      case 'invalid-credential':
+        return 'E-mail ou senha inválidos.';
+      case 'invalid-login-credentials':
+        return 'E-mail ou senha inválidos.';
+      case 'INVALID_LOGIN_CREDENTIALS':
+        return 'E-mail ou senha inválidos.';
+
       default:
         return 'Erro ao fazer login.';
     }
@@ -53,10 +62,26 @@ class _LoginPageState extends State<LoginPage> {
       error = null;
     });
 
+    final email = emailCtrl.text.trim();
+    final password = passCtrl.text.trim();
+
     try {
+      // ✅ Checagem antes do login para mostrar "não cadastrado"
+      // (evita cair em invalid-credential e não saber o motivo)
+      final methods =
+          await FirebaseAuth.instance.fetchSignInMethodsForEmail(email);
+
+      if (methods.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          error = 'Esse e-mail NÃO está cadastrado.';
+        });
+        return;
+      }
+
       final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: emailCtrl.text.trim(),
-        password: passCtrl.text.trim(),
+        email: email,
+        password: password,
       );
 
       final user = cred.user;
@@ -70,14 +95,20 @@ class _LoginPageState extends State<LoginPage> {
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      setState(() => error = _mapAuthError(e));
+      setState(() {
+        error = _mapAuthError(e);
+      });
     } catch (_) {
       if (!mounted) return;
-      setState(() => error = 'Erro inesperado.');
+      setState(() {
+        error = 'Erro inesperado.';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        loading = false;
+      });
     }
-
-    if (!mounted) return;
-    setState(() => loading = false);
   }
 
   // ================= GOOGLE LOGIN =================
@@ -90,13 +121,16 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
-      final googleSignIn = GoogleSignIn();
-      final googleUser = await googleSignIn.signIn();
+      final googleSignIn = GoogleSignIn(scopes: ['email']);
 
-      if (googleUser == null) {
-        setState(() => loading = false);
-        return;
+      // Forçar escolha de conta
+      final signedInUser = await googleSignIn.signInSilently();
+      if (signedInUser != null) {
+        await googleSignIn.signOut();
       }
+
+      final googleUser = await googleSignIn.signIn();
+      if (googleUser == null) return; // usuário cancelou login
 
       final googleAuth = await googleUser.authentication;
       final credential = GoogleAuthProvider.credential(
@@ -118,14 +152,20 @@ class _LoginPageState extends State<LoginPage> {
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      setState(() => error = _mapAuthError(e));
+      setState(() {
+        error = _mapAuthError(e);
+      });
     } catch (_) {
       if (!mounted) return;
-      setState(() => error = 'Erro ao entrar com Google.');
+      setState(() {
+        error = 'Erro ao entrar com Google.';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        loading = false;
+      });
     }
-
-    if (!mounted) return;
-    setState(() => loading = false);
   }
 
   // ================= UI =================
@@ -151,31 +191,24 @@ class _LoginPageState extends State<LoginPage> {
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 16),
-
                 TextField(
                   controller: emailCtrl,
                   decoration: const InputDecoration(labelText: 'Email'),
                 ),
-
                 const SizedBox(height: 8),
-
                 TextField(
                   controller: passCtrl,
                   obscureText: true,
                   decoration: const InputDecoration(labelText: 'Senha'),
                 ),
-
                 const SizedBox(height: 16),
-
                 if (error != null)
                   Text(
                     error!,
                     style: const TextStyle(color: Colors.red),
                     textAlign: TextAlign.center,
                   ),
-
                 const SizedBox(height: 8),
-
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -189,9 +222,7 @@ class _LoginPageState extends State<LoginPage> {
                         : const Text('Entrar'),
                   ),
                 ),
-
                 const SizedBox(height: 12),
-
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
@@ -199,9 +230,7 @@ class _LoginPageState extends State<LoginPage> {
                     child: const Text('Entrar com Google'),
                   ),
                 ),
-
                 const SizedBox(height: 16),
-
                 TextButton(
                   onPressed: () => Navigator.push(
                     context,

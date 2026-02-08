@@ -12,7 +12,7 @@ class UserService {
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseFunctions _functions = FirebaseFunctions.instance;
+  final FirebaseFunctions _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
 
   Map<String, dynamic>? _cachedUser;
   DateTime? _fetchedAt;
@@ -155,7 +155,8 @@ class UserService {
     print("🧠 DELETE_ACCOUNT -> UID=${user.uid}");
 
     try {
-      final callable = _functions.httpsCallable('deleteUserData');
+      // 🔹 Chama a Cloud Function segura que apaga Firestore e Auth
+      final callable = _functions.httpsCallable('deleteAccount');
       await callable();
 
       print("✅ DELETE_ACCOUNT -> CLOUD FUNCTION OK");

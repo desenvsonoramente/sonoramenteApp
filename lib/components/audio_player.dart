@@ -123,7 +123,7 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
               child: Center(
                 child: AnimatedBuilder(
                   animation: _pulseController,
-                  builder: (_, __) {
+                  builder: (_, _) {
                     return Transform.scale(
                       scale: _pulseController.value,
                       child: Container(

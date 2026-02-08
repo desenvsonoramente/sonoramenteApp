@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../services/auth_service.dart';
+import '../services/user_service.dart';
 import '../pages/login_page.dart';
 import '../pages/reauth_page.dart';
 
@@ -25,14 +25,16 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
-    // 🔐 Se não logado, manda para login (NÃO retorna shrink)
+    // 🔐 Se não logado, manda para login
     if (user == null) {
-      Future.microtask(() {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginPage()),
           (_) => false,
         );
       });
+
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
@@ -60,9 +62,11 @@ class _ProfilePageState extends State<ProfilePage> {
                 children: [
                   Text(
                     user.displayName ?? 'Usuário',
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                        fontSize: 20, fontWeight: FontWeight.bold),
                   ),
-                  Text(user.email ?? '', style: const TextStyle(color: Colors.black54)),
+                  Text(user.email ?? '',
+                      style: const TextStyle(color: Colors.black54)),
                   const SizedBox(height: 32),
 
                   ElevatedButton(
@@ -142,8 +146,12 @@ class _ProfilePageState extends State<ProfilePage> {
   // ================= DELETE ACCOUNT =================
 
   Future<void> deleteAccount() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
     try {
-      await AuthService.deleteAccount();
+      // 🔹 Chama a Cloud Function segura
+      await UserService().deleteAccount();
 
       if (!mounted) return;
       _goToLogin();
@@ -159,7 +167,7 @@ class _ProfilePageState extends State<ProfilePage> {
           MaterialPageRoute(
             builder: (_) => ReauthPage(
               onSuccess: () async {
-                await AuthService.deleteAccount();
+                await UserService().deleteAccount();
                 if (!mounted) return;
                 _goToLogin();
               },

@@ -10,7 +10,10 @@ const admin = require("firebase-admin");
 const { google } = require("googleapis");
 
 // ================= INIT =================
-admin.initializeApp();
+// ✅ Inicializa APENAS UMA VEZ
+if (admin.apps.length === 0) {
+  admin.initializeApp();
+}
 setGlobalOptions({ maxInstances: 10 });
 
 // ================= FUNCTION =================
@@ -93,3 +96,10 @@ exports.claimPurchase = onCall(async (request) => {
     throw new Error(error.message);
   }
 });
+
+// =====================================================
+// ================== DELETE ACCOUNT ====================
+// =====================================================
+
+// ✅ Exporta do arquivo, sem reinicializar admin lá dentro
+exports.deleteAccount = require("./delete_account").deleteAccount;

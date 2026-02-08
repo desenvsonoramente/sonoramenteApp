@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
-import '../services/auth_service.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class ReauthPage extends StatefulWidget {
   final Future<void> Function() onSuccess;
@@ -25,7 +24,6 @@ class _ReauthPageState extends State<ReauthPage> {
   @override
   void initState() {
     super.initState();
-
     final user = FirebaseAuth.instance.currentUser;
     emailCtrl.text = user?.email ?? '';
   }
@@ -49,7 +47,7 @@ class _ReauthPageState extends State<ReauthPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'Por segurança, confirme sua senha para continuar.',
+              'Por segurança, confirme sua identidade para continuar.',
               style: TextStyle(fontSize: 16),
             ),
             const SizedBox(height: 16),
@@ -63,6 +61,7 @@ class _ReauthPageState extends State<ReauthPage> {
 
             const SizedBox(height: 12),
 
+            // SENHA (para email/password)
             TextField(
               controller: passCtrl,
               obscureText: true,
@@ -101,12 +100,46 @@ class _ReauthPageState extends State<ReauthPage> {
       error = null;
     });
 
-    try {
-      await AuthService.reauthenticateWithPassword(
-        email: emailCtrl.text.trim(),
-        password: passCtrl.text.trim(),
-      );
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() {
+        error = 'Usuário não logado.';
+        loading = false;
+      });
+      return;
+    }
 
+    try {
+      final providers = user.providerData.map((p) => p.providerId).toList();
+      final isGoogle = providers.contains('google.com');
+
+      if (isGoogle) {
+        // 🔹 Reauth via Google
+        final googleUser = await GoogleSignIn().signIn();
+        if (googleUser == null) {
+          setState(() {
+            error = 'Login Google cancelado.';
+          });
+          return;
+        }
+
+        final googleAuth = await googleUser.authentication;
+        final credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
+
+        await user.reauthenticateWithCredential(credential);
+      } else {
+        // 🔹 Reauth via email/password
+        final credential = EmailAuthProvider.credential(
+          email: emailCtrl.text.trim(),
+          password: passCtrl.text.trim(),
+        );
+        await user.reauthenticateWithCredential(credential);
+      }
+
+      // 🔹 Sucesso: executa callback
       await widget.onSuccess();
 
       if (mounted) {
@@ -121,9 +154,7 @@ class _ReauthPageState extends State<ReauthPage> {
         error = 'Erro inesperado: $e';
       });
     } finally {
-      if (mounted) {
-        setState(() => loading = false);
-      }
+      if (mounted) setState(() => loading = false);
     }
   }
 }
