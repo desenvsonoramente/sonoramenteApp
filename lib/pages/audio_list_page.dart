@@ -102,6 +102,9 @@ class _AudioListPageState extends State<AudioListPage> {
                       final locked = !(_accessMap[audio.id] ?? false);
                       final isFree = audio.requiredBase == 'gratis';
 
+                      // ✅ “Premium” = não grátis e está bloqueado
+                      final isPremiumLocked = locked && !isFree;
+
                       return GestureDetector(
                         onTap: () {
                           if (locked) {
@@ -118,8 +121,7 @@ class _AudioListPageState extends State<AudioListPage> {
                             context,
                             MaterialPageRoute(
                               fullscreenDialog: true,
-                              builder: (_) =>
-                                  AudioPlayerModal(audio: audio),
+                              builder: (_) => AudioPlayerModal(audio: audio),
                             ),
                           );
                         },
@@ -141,34 +143,36 @@ class _AudioListPageState extends State<AudioListPage> {
                             children: [
                               Expanded(
                                 child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       audio.title,
                                       style: TextStyle(
-                                        fontWeight: isFree
-                                            ? FontWeight.bold
-                                            : null,
+                                        fontWeight:
+                                            isFree ? FontWeight.bold : null,
                                         fontSize: 16,
                                       ),
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
                                       audio.description,
-                                      style:
-                                          const TextStyle(fontSize: 14),
+                                      style: const TextStyle(fontSize: 14),
                                     ),
                                   ],
                                 ),
                               ),
-                              if (isFree)
-                                _badge('GRÁTIS', Colors.green),
+
+                              // ✅ Badges
+                              if (isFree) _badge('GRÁTIS', Colors.green),
+                              if (isPremiumLocked) ...[
+                                if (isFree) const SizedBox(width: 8),
+                                _badge('PREMIUM', const Color(0xFFB8860B)), // dourado
+                              ],
+
                               const SizedBox(width: 8),
+
                               Icon(
-                                locked
-                                    ? Icons.lock_outline
-                                    : Icons.play_arrow,
+                                locked ? Icons.lock_outline : Icons.play_arrow,
                               ),
                             ],
                           ),
