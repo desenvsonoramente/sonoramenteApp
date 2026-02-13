@@ -103,14 +103,7 @@ class _HomePageState extends State<HomePage> {
       leading: IconButton(
         icon: const Icon(Icons.menu, color: Colors.black),
         onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-      ),
-      actions: [
-        IconButton(
-          tooltip: 'Atualizar status',
-          icon: const Icon(Icons.refresh, color: Colors.black),
-          onPressed: _loadClaims,
-        ),
-      ],
+      )
     );
   }
 

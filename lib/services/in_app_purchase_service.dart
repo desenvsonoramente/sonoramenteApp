@@ -1,15 +1,20 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
-import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 
 class InAppPurchaseService {
   final InAppPurchase _iap = InAppPurchase.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFunctions _functions = FirebaseFunctions.instance;
+
+  /// ⚠️ Ajuste a região para a MESMA onde sua function `claimPurchase` foi deployada
+  /// Ex.: 'us-central1' (mais comum)
+  final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: 'us-central1');
 
   StreamSubscription<List<PurchaseDetails>>? _subscription;
   bool _initialized = false;
@@ -17,7 +22,7 @@ class InAppPurchaseService {
   /// PLANO BÁSICO (compra única)
   static const String basicProductId = 'pacote_premium';
 
-  /// ADDONS (futuro)
+  /// ADDONS (futuro) — mantenha apenas se existirem na Play Console
   static const Set<String> addonProductIds = {
     'addon_maternidade',
     'addon_luto',
@@ -47,7 +52,7 @@ class InAppPurchaseService {
 
     _subscription = _iap.purchaseStream.listen(
       _onPurchaseUpdate,
-      onError: (_) {
+      onError: (e) {
         _errorController.add('Erro inesperado ao processar pagamento.');
       },
     );
@@ -55,23 +60,47 @@ class InAppPurchaseService {
 
   void dispose() {
     _subscription?.cancel();
+    _subscription = null;
+    _initialized = false;
+
     _successController.close();
     _errorController.close();
-    _initialized = false;
   }
 
   // ================= PRODUCTS =================
 
-  Future<List<ProductDetails>> loadProducts() async {
+  Future<List<ProductDetails>> loadProducts({bool includeAddons = true}) async {
     final ids = <String>{
       basicProductId,
-      ...addonProductIds,
+      if (includeAddons) ...addonProductIds,
     };
 
     final response = await _iap.queryProductDetails(ids);
 
+    // Logs úteis para diagnosticar produto não encontrado / erro de store
+    // ignore: avoid_print
+    print('🧾 IAP query error: ${response.error}');
+    // ignore: avoid_print
+    print('🧾 IAP notFoundIDs: ${response.notFoundIDs}');
+    // ignore: avoid_print
+    print(
+      '🧾 IAP found: ${response.productDetails.map((p) => p.id).toList()}',
+    );
+
     if (response.error != null) {
-      _errorController.add('Erro ao carregar produtos.');
+      _errorController.add('Erro ao carregar produtos: ${response.error}');
+      return [];
+    }
+
+    // Se nem o básico aparecer, normalmente é:
+    // - app não instalado pela Play
+    // - conta não é testadora
+    // - produto não está ativo / ainda não propagou
+    if (!response.productDetails.any((p) => p.id == basicProductId)) {
+      _errorController.add(
+        'Produto "$basicProductId" não retornou da Play Store. '
+        'Verifique instalação pela loja e conta testadora.',
+      );
     }
 
     return response.productDetails;
@@ -102,6 +131,11 @@ class InAppPurchaseService {
 
   Future<void> _onPurchaseUpdate(List<PurchaseDetails> purchases) async {
     for (final purchase in purchases) {
+      if (purchase.status == PurchaseStatus.pending) {
+        // Opcional: você pode disparar UI de "processando"
+        continue;
+      }
+
       if (purchase.status == PurchaseStatus.purchased ||
           purchase.status == PurchaseStatus.restored) {
         final claimed = await _claimPurchase(purchase);
@@ -116,14 +150,12 @@ class InAppPurchaseService {
                 ? 'Compra restaurada com sucesso!'
                 : 'Compra realizada com sucesso!',
           );
+        } else {
+          _errorController.add('Falha ao validar a compra.');
         }
-      }
-
-      if (purchase.status == PurchaseStatus.canceled) {
+      } else if (purchase.status == PurchaseStatus.canceled) {
         _errorController.add('Pagamento cancelado.');
-      }
-
-      if (purchase.status == PurchaseStatus.error) {
+      } else if (purchase.status == PurchaseStatus.error) {
         _errorController.add(
           purchase.error?.message ?? 'Erro ao processar pagamento.',
         );
@@ -140,15 +172,21 @@ class InAppPurchaseService {
     try {
       final callable = _functions.httpsCallable('claimPurchase');
 
+      // ✅ Plataforma correta (android/ios) — NÃO use verificationData.source aqui
+      final platform = Platform.isAndroid ? 'android' : 'ios';
+
       final result = await callable.call({
         'productId': purchase.productID,
         'purchaseToken': purchase.verificationData.serverVerificationData,
-        'platform': purchase.verificationData.source, // android / ios
+        'platform': platform,
       });
 
-      return result.data != null && result.data['success'] == true;
+      final data = result.data;
+      return data != null && data is Map && data['success'] == true;
     } catch (e) {
       _errorController.add('Falha ao validar a compra.');
+      // ignore: avoid_print
+      print('❌ claimPurchase error: $e');
       return false;
     }
   }
