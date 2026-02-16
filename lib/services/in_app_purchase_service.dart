@@ -21,16 +21,12 @@ class InAppPurchaseService {
   bool _availabilityChecked = false;
   bool _isAvailableCached = false;
 
-  // ✅ Evita revalidar o mesmo token várias vezes na mesma sessão
   final Set<String> _claimInProgressOrDoneTokens = <String>{};
 
-  // ✅ Cache do packageName (Android)
   String? _cachedPackageName;
 
-  /// PLANO BÁSICO (compra única)
   static const String basicProductId = 'pacote_premium';
 
-  /// ADDONS (futuro)
   static const Set<String> addonProductIds = {
     'addon_maternidade',
     'addon_luto',
@@ -48,31 +44,12 @@ class InAppPurchaseService {
   Stream<String> get onSuccess => _successController.stream;
   Stream<String> get onError => _errorController.stream;
 
-  // ================= LOGGING =================
-
-  void _log(String message, {Object? data}) {
-    final now = DateTime.now().toIso8601String();
-    // ignore: avoid_print
-    if (data == null) {
-      print('[$now] 🛒 IAP | $message');
-    } else {
-      print('[$now] 🛒 IAP | $message | $data');
-    }
-  }
-
   // ================= AVAILABILITY =================
 
   Future<bool> checkAvailability() async {
     final available = await _iap.isAvailable();
     _availabilityChecked = true;
     _isAvailableCached = available;
-
-    _log('checkAvailability()', data: {
-      'available': available,
-      'platform': Platform.isAndroid ? 'android' : 'ios',
-      'uid': _auth.currentUser?.uid,
-    });
-
     return available;
   }
 
@@ -82,16 +59,8 @@ class InAppPurchaseService {
   // ================= INIT =================
 
   Future<void> initialize() async {
-    if (_initialized) {
-      _log('initialize() chamado, mas já estava inicializado.');
-      return;
-    }
+    if (_initialized) return;
     _initialized = true;
-
-    _log('initialize() start', data: {
-      'platform': Platform.isAndroid ? 'android' : 'ios',
-      'uid': _auth.currentUser?.uid,
-    });
 
     if (!_availabilityChecked) {
       await checkAvailability();
@@ -99,31 +68,25 @@ class InAppPurchaseService {
 
     if (!_isAvailableCached) {
       _errorController.add('Compras indisponíveis neste dispositivo.');
-      _log('Compras indisponíveis (isAvailable=false).');
       return;
     }
 
     _subscription = _iap.purchaseStream.listen(
       _onPurchaseUpdate,
-      onError: (e, st) {
-        _log('purchaseStream onError', data: {'error': e.toString()});
+      onError: (_) {
         _errorController.add('Erro inesperado ao processar pagamento.');
       },
       cancelOnError: false,
     );
-
-    _log('purchaseStream listener ativo.');
   }
 
   void dispose() {
-    _log('dispose() start');
     _subscription?.cancel();
     _subscription = null;
     _initialized = false;
 
     _successController.close();
     _errorController.close();
-    _log('dispose() end');
   }
 
   // ================= PRODUCTS =================
@@ -136,18 +99,7 @@ class InAppPurchaseService {
       if (includeAddons) ...addonProductIds,
     };
 
-    _log('loadProducts() queryProductDetails start', data: {
-      'ids': ids.toList(),
-      'includeAddons': includeAddons,
-    });
-
     final response = await _iap.queryProductDetails(ids);
-
-    _log('queryProductDetails response', data: {
-      'error': response.error?.toString(),
-      'notFoundIDs': response.notFoundIDs,
-      'found': response.productDetails.map((p) => p.id).toList(),
-    });
 
     if (response.error != null) {
       _errorController.add('Erro ao carregar produtos: ${response.error}');
@@ -159,10 +111,6 @@ class InAppPurchaseService {
         'Produto "$basicProductId" não retornou da Play Store. '
         'Verifique instalação pela loja e conta testadora.',
       );
-      _log('ATENÇÃO: Produto básico não retornou', data: {
-        'basicProductId': basicProductId,
-        'found': response.productDetails.map((p) => p.id).toList(),
-      });
     }
 
     return response.productDetails;
@@ -172,17 +120,10 @@ class InAppPurchaseService {
 
   Future<Map<String, dynamic>> loadUserAccess() async {
     final uid = _auth.currentUser?.uid;
-    if (uid == null) {
-      _log('loadUserAccess(): usuário null');
-      return {};
-    }
-
-    _log('loadUserAccess() start', data: {'uid': uid});
+    if (uid == null) return {};
 
     final snap = await _firestore.collection('users').doc(uid).get();
-    final data = snap.data() ?? {};
-    _log('loadUserAccess() result', data: data);
-    return data;
+    return snap.data() ?? {};
   }
 
   // ================= PURCHASE =================
@@ -193,50 +134,22 @@ class InAppPurchaseService {
     }
     if (!_isAvailableCached) {
       _errorController.add('Compras indisponíveis neste dispositivo.');
-      _log('buy() bloqueado: isAvailable=false', data: {'productId': product.id});
       return;
     }
 
-    _log('buy() start', data: {
-      'productId': product.id,
-      'title': product.title,
-      'price': product.price,
-      'currency': product.currencyCode,
-    });
-
     final purchaseParam = PurchaseParam(productDetails: product);
     await _iap.buyNonConsumable(purchaseParam: purchaseParam);
-
-    _log('buyNonConsumable() chamado', data: {'productId': product.id});
   }
 
   Future<void> restorePurchases() async {
-    _log('restorePurchases() start');
     await _iap.restorePurchases();
-    _log('restorePurchases() chamado');
   }
 
   // ================= STREAM =================
 
   Future<void> _onPurchaseUpdate(List<PurchaseDetails> purchases) async {
-    _log('purchaseStream update recebido', data: {
-      'count': purchases.length,
-      'uid': _auth.currentUser?.uid,
-    });
-
     for (final purchase in purchases) {
-      _log('PurchaseDetails', data: {
-        'productID': purchase.productID,
-        'status': purchase.status.toString(),
-        'pendingCompletePurchase': purchase.pendingCompletePurchase,
-        'purchaseID': purchase.purchaseID,
-        'transactionDate': purchase.transactionDate,
-        'verificationData.source': purchase.verificationData.source,
-        'hasError': purchase.error != null,
-      });
-
       if (purchase.status == PurchaseStatus.pending) {
-        _log('status=pending (aguardando)');
         continue;
       }
 
@@ -245,44 +158,22 @@ class InAppPurchaseService {
         final token = purchase.verificationData.serverVerificationData;
 
         if (_claimInProgressOrDoneTokens.contains(token)) {
-          _log('claimPurchase ignorado (token já processado)', data: {
-            'productID': purchase.productID,
-            'status': purchase.status.toString(),
-            'tokenLen': token.length,
-          });
-
           if (purchase.pendingCompletePurchase) {
-            _log('completePurchase() start (já processado)',
-                data: {'productID': purchase.productID});
             await _iap.completePurchase(purchase);
-            _log('completePurchase() done (já processado)',
-                data: {'productID': purchase.productID});
           }
           continue;
         }
 
         _claimInProgressOrDoneTokens.add(token);
 
-        _log('status=purchased/restored -> iniciando claimPurchase', data: {
-          'productID': purchase.productID,
-          'status': purchase.status.toString(),
-        });
-
         bool claimed = false;
         try {
           claimed = await _claimPurchase(purchase);
         } finally {
           if (purchase.pendingCompletePurchase) {
-            _log('completePurchase() start', data: {'productID': purchase.productID});
             await _iap.completePurchase(purchase);
-            _log('completePurchase() done', data: {'productID': purchase.productID});
           }
         }
-
-        _log('claimPurchase result', data: {
-          'productID': purchase.productID,
-          'claimed': claimed,
-        });
 
         if (claimed) {
           _successController.add(
@@ -294,25 +185,11 @@ class InAppPurchaseService {
           _errorController.add('Falha ao validar a compra.');
         }
       } else if (purchase.status == PurchaseStatus.canceled) {
-        _log('status=canceled');
         _errorController.add('Pagamento cancelado.');
       } else if (purchase.status == PurchaseStatus.error) {
-        _log('status=error (detalhes)', data: {
-          'code': purchase.error?.code,
-          'message': purchase.error?.message,
-          'details': purchase.error?.details?.toString(),
-          'source': purchase.error?.source,
-          'productID': purchase.productID,
-        });
-
         _errorController.add(
           purchase.error?.message ?? 'Erro ao processar pagamento.',
         );
-      } else {
-        _log('status=unknown/unhandled', data: {
-          'status': purchase.status.toString(),
-          'productID': purchase.productID,
-        });
       }
     }
   }
@@ -321,10 +198,7 @@ class InAppPurchaseService {
 
   Future<bool> _claimPurchase(PurchaseDetails purchase) async {
     final uid = _auth.currentUser?.uid;
-    if (uid == null) {
-      _log('_claimPurchase(): uid null');
-      return false;
-    }
+    if (uid == null) return false;
 
     try {
       final callable = _functions.httpsCallable('claimPurchase');
@@ -334,14 +208,6 @@ class InAppPurchaseService {
       final String? packageName =
           Platform.isAndroid ? await _getAndroidPackageName() : null;
 
-      _log('claimPurchase() call start', data: {
-        'uid': uid,
-        'productId': purchase.productID,
-        'platform': Platform.isAndroid ? 'android' : 'ios',
-        'packageName': packageName,
-        'tokenLen': token.length,
-      });
-
       final payload = <String, dynamic>{
         'productId': purchase.productID,
         'purchaseToken': token,
@@ -350,34 +216,19 @@ class InAppPurchaseService {
 
       final result = await callable.call(payload);
 
-      _log('claimPurchase() response', data: result.data);
-
       final data = result.data;
       final ok = data != null && data is Map && data['success'] == true;
 
-      _log('claimPurchase() parsed', data: {
-        'success': ok,
-        'productId': purchase.productID,
-      });
-
       return ok;
     } on FirebaseFunctionsException catch (e) {
-      // ✅ Diagnóstico real do backend (HttpsError v2)
-      _log('❌ claimPurchase FirebaseFunctionsException', data: {
-        'code': e.code,
-        'message': e.message,
-        'details': e.details?.toString(),
-      });
-
       final msg = (e.message == null || e.message!.isEmpty)
           ? 'Falha ao validar a compra.'
           : e.message!;
 
       _errorController.add(msg);
       return false;
-    } catch (e) {
+    } catch (_) {
       _errorController.add('Falha ao validar a compra.');
-      _log('❌ claimPurchase exception', data: e.toString());
       return false;
     }
   }
@@ -391,14 +242,6 @@ class InAppPurchaseService {
 
     final info = await PackageInfo.fromPlatform();
     _cachedPackageName = info.packageName;
-
-    _log('PackageInfo.fromPlatform()', data: {
-      'packageName': _cachedPackageName,
-      'appName': info.appName,
-      'version': info.version,
-      'buildNumber': info.buildNumber,
-    });
-
     return _cachedPackageName!;
   }
 }

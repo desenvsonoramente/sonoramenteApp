@@ -30,7 +30,7 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
   bool isPlaying = false;
   double volume = 1.0;
 
-  late AnimationController _pulseController;
+  late final AnimationController _pulseController;
 
   static const Color appGreen = Color(0xFF8FB8A6);
   static const Color backgroundColor = Color(0xFFFBFAF7);
@@ -39,6 +39,7 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
   final Map<String, String> _urlCache = {};
 
   bool _listenersAttached = false;
+  bool _initStarted = false;
 
   @override
   void initState() {
@@ -82,7 +83,7 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
     });
   }
 
-  /// Regras novas:
+  /// Regras:
   /// - Firestore deve vir com: "gratis/arquivo.wav" ou "basico/arquivo.wav"
   /// - Compatível com URL antiga http(s)
   /// - Compatível com dado antigo "arquivo.wav" (assumimos gratis/)
@@ -107,16 +108,12 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
   }
 
   Future<String> _resolvePlayableUrl(String urlOrPath) async {
-    debugPrint('🎵 [AudioPlayerModal] resolve input="$urlOrPath"');
-
     final candidates = _candidateStorageKeys(urlOrPath);
-    debugPrint('🎵 [AudioPlayerModal] candidates=${candidates.join(" | ")}');
 
-    // URL antiga
+    // Se já é URL antiga HTTP(s)
     if (candidates.length == 1 &&
         (candidates.first.startsWith('http://') ||
             candidates.first.startsWith('https://'))) {
-      debugPrint('🎵 [AudioPlayerModal] input já é URL HTTP');
       return candidates.first;
     }
 
@@ -124,25 +121,16 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
 
     for (final key in candidates) {
       final cached = _urlCache[key];
-      if (cached != null) {
-        debugPrint('🎵 [AudioPlayerModal] cache HIT ($key) -> $cached');
-        return cached;
-      }
+      if (cached != null) return cached;
 
       try {
         final ref = FirebaseStorage.instance.ref(key);
-        debugPrint('🎵 [AudioPlayerModal] trying ref.fullPath="${ref.fullPath}"');
-
         final downloadUrl = await ref.getDownloadURL();
-        debugPrint('🎵 [AudioPlayerModal] downloadURL OK ($key) -> $downloadUrl');
 
         _urlCache[key] = downloadUrl;
         return downloadUrl;
       } on FirebaseException catch (e) {
         lastFirebaseError = e;
-        debugPrint(
-          '⚠️ [AudioPlayerModal] getDownloadURL falhou ($key): code=${e.code} message=${e.message}',
-        );
 
         // se não encontrou, tenta próximo candidato
         if (e.code == 'object-not-found') {
@@ -151,7 +139,7 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
 
         // permission/unauthorized: para aqui (não adianta tentar outro candidato)
         if (e.code == 'unauthorized' || e.code == 'permission-denied') {
-          throw e;
+          rethrow; // mantém stack trace original
         }
 
         // outros erros: tenta próximo mesmo assim
@@ -164,35 +152,19 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
       throw lastFirebaseError;
     }
 
-    throw Exception(
-      'Não foi possível resolver URL tocável para "$urlOrPath".',
-    );
+    throw Exception('Não foi possível resolver URL tocável para "$urlOrPath".');
   }
 
   Future<void> _init() async {
-    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    debugPrint('🎵 [AudioPlayerModal] _init()');
-    debugPrint('🎵 [AudioPlayerModal] audio.id="${widget.audio.id}"');
-    debugPrint('🎵 [AudioPlayerModal] audio.title="${widget.audio.title}"');
-    debugPrint('🎵 [AudioPlayerModal] audio.audioUrl/path="${widget.audio.audioUrl}"');
+    if (_initStarted) return;
+    _initStarted = true;
 
     try {
       final user = FirebaseAuth.instance.currentUser;
-      debugPrint(
-        '🔐 [AudioPlayerModal] currentUser uid=${user?.uid} email=${user?.email}',
-      );
+      if (user == null) return;
 
-      if (user == null) {
-        debugPrint('❌ [AudioPlayerModal] usuário não logado. Abortando.');
-        return;
-      }
-
-      debugPrint('🔐 [AudioPlayerModal] checando canAccessAudio...');
       final canAccess = await _userService.canAccessAudio(audio: widget.audio);
-      debugPrint('🔐 [AudioPlayerModal] canAccessAudio=$canAccess');
-
       if (!canAccess) {
-        debugPrint('🚫 [AudioPlayerModal] sem acesso -> PremiumPage');
         if (!mounted) return;
         Navigator.push(
           context,
@@ -204,47 +176,30 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
       _attachListenersOnce();
 
       final sourceKey = widget.audio.audioUrl.trim();
-      debugPrint('🎵 [AudioPlayerModal] sourceKey="$sourceKey"');
-
-      debugPrint('🎵 [AudioPlayerModal] resolvendo URL tocável...');
       final playableUrl = await _resolvePlayableUrl(sourceKey);
-      debugPrint('🎵 [AudioPlayerModal] playableUrl="$playableUrl"');
 
       // Evita tentar tocar "arquivo local" (FileDataSource)
-      if (!(playableUrl.startsWith('http://') ||
-          playableUrl.startsWith('https://'))) {
-        debugPrint(
-          '❌ [AudioPlayerModal] playableUrl NÃO é HTTP. Abortando.\nplayableUrl="$playableUrl"',
-        );
-        return;
-      }
+      final isHttp = playableUrl.startsWith('http://') ||
+          playableUrl.startsWith('https://');
+      if (!isHttp) return;
 
-      debugPrint('🔁 [AudioPlayerModal] setUrl()');
       await _player.setUrl(playableUrl);
-
       await _player.setVolume(volume);
 
-      if (mounted) {
-        debugPrint('▶️ [AudioPlayerModal] play()');
-        await _player.play();
-        debugPrint('✅ [AudioPlayerModal] comando play enviado');
-      }
+      if (!mounted) return;
+      await _player.play();
     } on FirebaseException catch (e) {
-      debugPrint(
-        '❌ [AudioPlayerModal] FirebaseException: code=${e.code} message=${e.message}',
-      );
-
       // Se o Storage negou (claims/regras), manda pra Premium
-      if ((e.code == 'unauthorized' || e.code == 'permission-denied') &&
-          mounted) {
-        debugPrint('🚫 [AudioPlayerModal] Storage negou -> PremiumPage');
+      final denied =
+          e.code == 'unauthorized' || e.code == 'permission-denied';
+      if (denied && mounted) {
         Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const PremiumPage()),
         );
       }
-    } catch (e) {
-      debugPrint('❌ [AudioPlayerModal] Erro no _init: $e');
+    } catch (_) {
+      // opcional: manter silencioso (sem prints) como você pediu
     }
   }
 
@@ -292,26 +247,27 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
               child: Center(
                 child: AnimatedBuilder(
                   animation: _pulseController,
-                  builder: (_, _) {
+                  builder: (_, child) {
                     return Transform.scale(
                       scale: _pulseController.value,
-                      child: Container(
-                        width: 220,
-                        height: 220,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: RadialGradient(
-                            colors: [
-                              appGreen.withValues(alpha: 0.65),
-                              appGreen.withValues(alpha: 0.35),
-                              appGreen.withValues(alpha: 0.15),
-                            ],
-                            stops: const [0.4, 0.7, 1],
-                          ),
-                        ),
-                      ),
+                      child: child,
                     );
                   },
+                  child: Container(
+                    width: 220,
+                    height: 220,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          appGreen.withValues(alpha: 0.65),
+                          appGreen.withValues(alpha: 0.35),
+                          appGreen.withValues(alpha: 0.15),
+                        ],
+                        stops: const [0.4, 0.7, 1],
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
