@@ -2,7 +2,7 @@ name: sonoramente
 description: "Um aplicativo de cuidado emocional em áudio."
 publish_to: 'none'
 
-version: 1.0.20+21
+version: 1.0.21+22
 
 environment:
   sdk: ^3.10.7
@@ -24,12 +24,13 @@ dependencies:
   just_audio: ^0.9.36
   audioplayers: ^6.0.0
 
-  # Firebase
+  # Firebase (VERSÕES COMPATÍVEIS ENTRE SI)
   firebase_core: ^2.32.0
   firebase_auth: ^4.17.0
   cloud_firestore: ^4.15.0
-  firebase_storage: ^11.6.5
+  firebase_storage: ^11.7.7
   cloud_functions: ^4.6.5
+  firebase_app_check: ^0.2.2+7
   secure_application: ^4.1.0
 
   # Login com Google

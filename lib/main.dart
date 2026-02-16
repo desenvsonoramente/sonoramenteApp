@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:screen_protector/screen_protector.dart';
 
 import 'widgets/auth_gate.dart';
@@ -8,6 +11,20 @@ import 'components/session_guard.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+
+  // ✅ App Check (DEV): Android debug provider
+  // Importante: no primeiro run, pegue o DEBUG TOKEN no Logcat e cadastre no Firebase Console
+  // Firebase Console → App Check → seu app Android → Manage debug tokens
+  if (Platform.isAndroid) {
+    try {
+      await FirebaseAppCheck.instance.activate(
+        androidProvider: AndroidProvider.debug,
+      );
+    } catch (_) {
+      // Se enforcement estiver ON e isso falhar, as Functions podem recusar.
+    }
+  }
+
   runApp(const MyApp());
 }
 
