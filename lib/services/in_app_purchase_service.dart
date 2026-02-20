@@ -21,11 +21,19 @@ class InAppPurchaseService {
   bool _availabilityChecked = false;
   bool _isAvailableCached = false;
 
+  /// ✅ Evita revalidar o mesmo token várias vezes na mesma sessão
   final Set<String> _claimInProgressOrDoneTokens = <String>{};
 
+  /// ✅ Dedup extra (algumas lojas podem trocar serverVerificationData em restore)
+  final Set<String> _claimInProgressOrDonePurchaseIds = <String>{};
+
+  /// ✅ Cache do packageName (Android)
   String? _cachedPackageName;
 
-  static const String basicProductId = 'pacote_premium';
+  /// SKU pago principal na loja.
+  /// Observação: Mesmo que o ID seja "pacote_premium", o backend pode liberar basePlan="basico"
+  /// conforme sua regra de negócio (requiredBase="basico").
+  static const String paidBaseProductId = 'pacote_premium';
 
   static const Set<String> addonProductIds = {
     'addon_maternidade',
@@ -95,7 +103,7 @@ class InAppPurchaseService {
     bool includeAddons = includeAddonsByDefault,
   }) async {
     final ids = <String>{
-      basicProductId,
+      paidBaseProductId,
       if (includeAddons) ...addonProductIds,
     };
 
@@ -106,10 +114,10 @@ class InAppPurchaseService {
       return [];
     }
 
-    if (!response.productDetails.any((p) => p.id == basicProductId)) {
+    if (!response.productDetails.any((p) => p.id == paidBaseProductId)) {
       _errorController.add(
-        'Produto "$basicProductId" não retornou da Play Store. '
-        'Verifique instalação pela loja e conta testadora.',
+        'Produto "$paidBaseProductId" não retornou da loja. '
+        'Verifique se o app foi instalado pela App Store/Play Store e se o produto está aprovado.',
       );
     }
 
@@ -122,8 +130,20 @@ class InAppPurchaseService {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return {};
 
-    final snap = await _firestore.collection('users').doc(uid).get();
-    return snap.data() ?? {};
+    try {
+      final snap = await _firestore.collection('users').doc(uid).get();
+      return snap.data() ?? {};
+    } on FirebaseException catch (e) {
+      // ✅ Produção: não crasha se App Check / regras bloquearem.
+      if (e.code == 'permission-denied') {
+        _errorController.add(
+          'Não foi possível validar seu acesso. '
+          'Atualize o app pela loja oficial e tente novamente.',
+        );
+        return {};
+      }
+      rethrow;
+    }
   }
 
   // ================= PURCHASE =================
@@ -156,15 +176,31 @@ class InAppPurchaseService {
       if (purchase.status == PurchaseStatus.purchased ||
           purchase.status == PurchaseStatus.restored) {
         final token = purchase.verificationData.serverVerificationData;
+        final purchaseId = (purchase.purchaseID ?? '').trim();
 
-        if (_claimInProgressOrDoneTokens.contains(token)) {
+        // ✅ Dedup por purchaseID quando existir
+        if (purchaseId.isNotEmpty &&
+            _claimInProgressOrDonePurchaseIds.contains(purchaseId)) {
           if (purchase.pendingCompletePurchase) {
             await _iap.completePurchase(purchase);
           }
           continue;
         }
 
-        _claimInProgressOrDoneTokens.add(token);
+        // ✅ Dedup por token
+        if (token.isNotEmpty && _claimInProgressOrDoneTokens.contains(token)) {
+          if (purchase.pendingCompletePurchase) {
+            await _iap.completePurchase(purchase);
+          }
+          continue;
+        }
+
+        if (purchaseId.isNotEmpty) {
+          _claimInProgressOrDonePurchaseIds.add(purchaseId);
+        }
+        if (token.isNotEmpty) {
+          _claimInProgressOrDoneTokens.add(token);
+        }
 
         bool claimed = false;
         try {
@@ -197,13 +233,17 @@ class InAppPurchaseService {
   // ================= CLAIM (BACKEND) =================
 
   Future<bool> _claimPurchase(PurchaseDetails purchase) async {
-    final uid = _auth.currentUser?.uid;
-    if (uid == null) return false;
+    final user = _auth.currentUser;
+    if (user == null) return false;
+
+    final token = purchase.verificationData.serverVerificationData;
+    if (token.isEmpty) {
+      _errorController.add('Não foi possível validar a compra (token inválido).');
+      return false;
+    }
 
     try {
       final callable = _functions.httpsCallable('claimPurchase');
-
-      final token = purchase.verificationData.serverVerificationData;
 
       final String? packageName =
           Platform.isAndroid ? await _getAndroidPackageName() : null;
@@ -219,17 +259,55 @@ class InAppPurchaseService {
       final data = result.data;
       final ok = data != null && data is Map && data['success'] == true;
 
-      return ok;
-    } on FirebaseFunctionsException catch (e) {
-      final msg = (e.message == null || e.message!.isEmpty)
-          ? 'Falha ao validar a compra.'
-          : e.message!;
+      if (!ok) {
+        _errorController.add('Não foi possível validar a compra.');
+        return false;
+      }
 
-      _errorController.add(msg);
+      // ✅ Atualizar token para puxar claims novas (basePlan, sessionValid, addons)
+      await _refreshIdTokenClaims();
+
+      return true;
+    } on FirebaseFunctionsException catch (e) {
+      _errorController.add(_mapFunctionsErrorToUserMessage(e));
+      return false;
+    } on FirebaseException catch (_) {
+      _errorController.add('Falha ao validar a compra. Tente novamente.');
       return false;
     } catch (_) {
-      _errorController.add('Falha ao validar a compra.');
+      _errorController.add('Falha ao validar a compra. Tente novamente.');
       return false;
+    }
+  }
+
+  Future<void> _refreshIdTokenClaims() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    await user.getIdToken(true);
+  }
+
+  String _mapFunctionsErrorToUserMessage(FirebaseFunctionsException e) {
+    switch (e.code) {
+      case 'failed-precondition':
+        return 'Não foi possível validar o app. '
+            'Atualize/instale pela loja oficial e tente novamente.';
+      case 'permission-denied':
+        return 'Ação não permitida. '
+            'Atualize/instale pela loja oficial e tente novamente.';
+      case 'unauthenticated':
+        return 'Sessão expirada. Faça login novamente.';
+      case 'resource-exhausted':
+        return 'Muitas tentativas. Aguarde alguns minutos e tente novamente.';
+      case 'invalid-argument':
+        return e.message?.isNotEmpty == true
+            ? e.message!
+            : 'Dados inválidos. Tente novamente.';
+      case 'internal':
+      default:
+        return e.message?.isNotEmpty == true
+            ? e.message!
+            : 'Falha ao validar a compra. Tente novamente.';
     }
   }
 

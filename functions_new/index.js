@@ -1,54 +1,133 @@
 /**
- * Firebase Functions v2 – claimPurchase (PRODUÇÃO)
- * Google Play Billing Validation
+ * Firebase Functions – Produção
+ * - callables v2: claimPurchase, deleteAccount (com App Check)
+ * - trigger auth v1: createUserDoc (estável para deploy)
  */
 
-const { setGlobalOptions } = require("firebase-functions");
+// ✅ v2 (2nd gen)
+const { setGlobalOptions } = require("firebase-functions/v2");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
+
+// ✅ v1 (1st gen) - IMPORT CORRETO (corrige o .auth.user() undefined)
+const functionsV1 = require("firebase-functions/v1");
+
 const admin = require("firebase-admin");
 const { google } = require("googleapis");
 
 // ================= INIT =================
-// ✅ Inicializa APENAS UMA VEZ
 if (admin.apps.length === 0) {
   admin.initializeApp();
 }
-setGlobalOptions({ maxInstances: 10 });
+
+// ✅ Região para v2
+setGlobalOptions({
+  region: "us-central1",
+  maxInstances: 10,
+});
 
 // ================= CONFIG =================
-// ✅ Não confie no packageName que vem do app.
-// Ajuste para o packageName real do seu Android:
 const PACKAGE_NAME = "com.sonoramente.app";
 
-// ================= FUNCTION =================
-exports.claimPurchase = onCall(async (request) => {
-  try {
-    const { productId, purchaseToken, packageName } = request.data;
-    const context = request.auth;
+// ✅ Whitelist de produtos Android (produção)
+const ALLOWED_ANDROID_PRODUCTS = new Set(["pacote_premium"]);
 
-    if (!context?.uid) {
-      throw new HttpsError("unauthenticated", "Usuário não autenticado.");
+// =====================================================
+// ================== AUTH TRIGGER (v1) =================
+// =====================================================
+// ✅ Cria doc do usuário e seta claims iniciais
+exports.createUserDoc = functionsV1
+  .region("us-central1")
+  .auth.user()
+  .onCreate(async (user) => {
+    const uid = user.uid;
+
+    logger.info("👤 createUserDoc onCreate", {
+      uid,
+      email: user.email ?? null,
+      providerData: (user.providerData || []).map((p) => p.providerId),
+    });
+
+    // 1) Claims iniciais (para regras funcionarem)
+    try {
+      await admin.auth().setCustomUserClaims(uid, {
+        sessionValid: true,
+        basePlan: "gratis",
+        addons: [],
+      });
+      logger.info("✅ Claims iniciais setadas", { uid });
+    } catch (e) {
+      logger.error("❌ Falha ao setar claims iniciais", {
+        uid,
+        message: e?.message ?? String(e),
+        stack: e?.stack ?? null,
+      });
     }
 
+    // 2) Firestore doc
+    const userRef = admin.firestore().collection("users").doc(uid);
+
+    await userRef.set(
+      {
+        uid,
+        name: user.displayName ?? "",
+        email: user.email ?? "",
+        photoURL: user.photoURL ?? "",
+        plan: "gratis", // compat legado
+        basePlan: "gratis",
+        addons: [],
+        deviceIdAtivo: null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    logger.info("✅ Firestore user doc criado/mesclado", { uid });
+  });
+
+// =====================================================
+// ================== CLAIM PURCHASE (v2) ===============
+// =====================================================
+exports.claimPurchase = onCall({ enforceAppCheck: true }, async (request) => {
+  try {
+    if (!request.app) {
+      throw new HttpsError(
+        "failed-precondition",
+        "App Check inválido. Instale/atualize pela loja oficial e tente novamente."
+      );
+    }
+
+    const { productId, purchaseToken, packageName } = request.data || {};
+    const authCtx = request.auth;
+
+    if (!authCtx?.uid) {
+      throw new HttpsError("unauthenticated", "Usuário não autenticado.");
+    }
     if (!productId || !purchaseToken) {
       throw new HttpsError("invalid-argument", "Dados incompletos.");
     }
 
-    // ✅ Valida packageName vindo do app (se vier diferente, bloqueia).
-    // Se você quiser parar de mandar packageName do app, pode:
-    // - remover do app
-    // - e aqui usar só PACKAGE_NAME.
+    // ✅ Bloqueia productId inventado
+    if (!ALLOWED_ANDROID_PRODUCTS.has(String(productId))) {
+      logger.warn("❌ productId não permitido", {
+        uid: authCtx.uid,
+        productId,
+      });
+      throw new HttpsError("permission-denied", "Produto inválido.");
+    }
+
+    // ✅ Não confia no packageName do app
     if (packageName && packageName !== PACKAGE_NAME) {
       logger.warn("❌ packageName divergente", {
-        uid: context.uid,
+        uid: authCtx.uid,
         received: packageName,
         expected: PACKAGE_NAME,
       });
       throw new HttpsError("permission-denied", "packageName inválido.");
     }
 
-    const uid = context.uid;
+    const uid = authCtx.uid;
 
     logger.info("🔍 Validando compra", {
       uid,
@@ -57,7 +136,6 @@ exports.claimPurchase = onCall(async (request) => {
       tokenLen: String(purchaseToken).length,
     });
 
-    // ================= GOOGLE PLAY CLIENT (LAZY) =================
     const auth = new google.auth.GoogleAuth({
       scopes: ["https://www.googleapis.com/auth/androidpublisher"],
     });
@@ -67,7 +145,6 @@ exports.claimPurchase = onCall(async (request) => {
       auth,
     });
 
-    // ================= VALIDAR COMPRA =================
     const purchase = await androidPublisher.purchases.products.get({
       packageName: PACKAGE_NAME,
       productId,
@@ -87,26 +164,28 @@ exports.claimPurchase = onCall(async (request) => {
     });
 
     if (data.purchaseState !== 0) {
-      // 0 = purchased (em compras INAPP)
       throw new HttpsError("failed-precondition", "Compra não concluída.");
     }
 
-    // ================= ACKNOWLEDGE =================
+    // ACK
     if (data.acknowledgementState === 0) {
       await androidPublisher.purchases.products.acknowledge({
         packageName: PACKAGE_NAME,
         productId,
         token: purchaseToken,
       });
-
       logger.info("✅ Compra acknowledged", { uid, productId });
     } else {
       logger.info("ℹ️ Compra já estava acknowledged", { uid, productId });
     }
 
-    // ================= FIRESTORE =================
-    // ✅ Mantém "plan" pra não quebrar nada
-    // ✅ Adiciona "basePlan" porque seu app lê basePlan
+    // ✅ SKU pacote_premium -> libera basePlan basico (seu modelo)
+    await admin.auth().setCustomUserClaims(uid, {
+      sessionValid: true,
+      basePlan: "basico",
+      addons: [],
+    });
+
     await admin.firestore().collection("users").doc(uid).set(
       {
         plan: "basico",
@@ -131,7 +210,6 @@ exports.claimPurchase = onCall(async (request) => {
       orderId: data.orderId ?? null,
     };
   } catch (error) {
-    // Se já for HttpsError, repassa
     if (error instanceof HttpsError) {
       logger.error("❌ claimPurchase HttpsError:", {
         code: error.code,
@@ -141,7 +219,6 @@ exports.claimPurchase = onCall(async (request) => {
       throw error;
     }
 
-    // Erro genérico (Google API, permissão, etc.)
     logger.error("❌ claimPurchase erro:", {
       message: error?.message ?? String(error),
       stack: error?.stack ?? null,
@@ -155,8 +232,6 @@ exports.claimPurchase = onCall(async (request) => {
 });
 
 // =====================================================
-// ================== DELETE ACCOUNT ====================
+// ================== DELETE ACCOUNT (v2) ===============
 // =====================================================
-
-// ✅ Exporta do arquivo, sem reinicializar admin lá dentro
 exports.deleteAccount = require("./delete_account").deleteAccount;

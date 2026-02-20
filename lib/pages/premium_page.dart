@@ -81,7 +81,7 @@ class _PremiumPageState extends State<PremiumPage> {
   ProductDetails? _findBasic() {
     try {
       return products.firstWhere(
-        (p) => p.id == InAppPurchaseService.basicProductId,
+        (p) => p.id == InAppPurchaseService.paidBaseProductId,
       );
     } catch (_) {
       return null;
@@ -138,7 +138,7 @@ class _PremiumPageState extends State<PremiumPage> {
       'DIAGNÓSTICO (PremiumPage)',
       '--------------------------------',
       'IAP disponível (isAvailable): $iapAvailable',
-      'Produto esperado: ${InAppPurchaseService.basicProductId}',
+      'Produto esperado: ${InAppPurchaseService.paidBaseProductId}',
       'Produto carregou: ${basic != null}',
       if (basic != null) 'Preço: ${basic.price} (${basic.currencyCode})',
       'BasePlan (Firestore): $basePlan',
