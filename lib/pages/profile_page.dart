@@ -21,6 +21,10 @@ class _ProfilePageState extends State<ProfilePage> {
     'https://vanessarabello.com.br/sonoramente_politicaprivacidade.html',
   );
 
+  final UserService _userService = UserService();
+
+  bool _deleting = false;
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -63,10 +67,14 @@ class _ProfilePageState extends State<ProfilePage> {
                   Text(
                     user.displayName ?? 'Usuário',
                     style: const TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.bold),
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                  Text(user.email ?? '',
-                      style: const TextStyle(color: Colors.black54)),
+                  Text(
+                    user.email ?? '',
+                    style: const TextStyle(color: Colors.black54),
+                  ),
                   const SizedBox(height: 32),
 
                   ElevatedButton(
@@ -87,8 +95,14 @@ class _ProfilePageState extends State<ProfilePage> {
                       backgroundColor: Colors.red,
                       foregroundColor: Colors.white,
                     ),
-                    onPressed: confirmDeleteAccount,
-                    child: const Text('Excluir conta'),
+                    onPressed: _deleting ? null : confirmDeleteAccount,
+                    child: _deleting
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Excluir conta'),
                   ),
                 ],
               ),
@@ -108,10 +122,10 @@ class _ProfilePageState extends State<ProfilePage> {
         mode: LaunchMode.externalApplication,
       );
 
-      if (!mounted) return;
+      if (!context.mounted) return;
       if (!launched) _showSnackBar('Não foi possível abrir a Política de Privacidade');
     } catch (_) {
-      if (!mounted) return;
+      if (!context.mounted) return;
       _showSnackBar('Erro ao abrir política de privacidade');
     }
   }
@@ -121,19 +135,19 @@ class _ProfilePageState extends State<ProfilePage> {
   void confirmDeleteAccount() {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Excluir conta'),
         content: const Text(
           'Essa ação é permanente.\nTodos os seus dados serão apagados.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancelar'),
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               await deleteAccount();
             },
             child: const Text('Excluir'),
@@ -148,15 +162,18 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> deleteAccount() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+    if (_deleting) return;
+
+    setState(() => _deleting = true);
 
     try {
       // 🔹 Chama a Cloud Function segura
-      await UserService().deleteAccount();
+      await _userService.deleteAccount();
 
-      if (!mounted) return;
+      if (!context.mounted) return;
       _goToLogin();
     } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
+      if (!context.mounted) return;
 
       // 🔐 Precisa reauth
       if (e.code == 'requires-recent-login') {
@@ -167,9 +184,14 @@ class _ProfilePageState extends State<ProfilePage> {
           MaterialPageRoute(
             builder: (_) => ReauthPage(
               onSuccess: () async {
-                await UserService().deleteAccount();
-                if (!mounted) return;
-                _goToLogin();
+                try {
+                  await _userService.deleteAccount();
+                  if (!context.mounted) return;
+                  _goToLogin();
+                } catch (_) {
+                  if (!context.mounted) return;
+                  _showSnackBar('Erro ao excluir conta após reautenticação');
+                }
               },
             ),
           ),
@@ -178,8 +200,10 @@ class _ProfilePageState extends State<ProfilePage> {
         _showSnackBar('Erro ao excluir: ${e.message}');
       }
     } catch (_) {
-      if (!mounted) return;
+      if (!context.mounted) return;
       _showSnackBar('Erro desconhecido ao excluir conta');
+    } finally {
+      if (mounted) setState(() => _deleting = false);
     }
   }
 
@@ -193,7 +217,7 @@ class _ProfilePageState extends State<ProfilePage> {
   // ================= UI UTILS =================
 
   void _showSnackBar(String message) {
-    if (!mounted) return;
+    if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
