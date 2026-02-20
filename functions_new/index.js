@@ -73,7 +73,6 @@ exports.createUserDoc = functionsV1
         name: user.displayName ?? "",
         email: user.email ?? "",
         photoURL: user.photoURL ?? "",
-        plan: "gratis", // compat legado
         basePlan: "gratis",
         addons: [],
         deviceIdAtivo: null,
@@ -188,7 +187,6 @@ exports.claimPurchase = onCall({ enforceAppCheck: true }, async (request) => {
 
     await admin.firestore().collection("users").doc(uid).set(
       {
-        plan: "basico",
         basePlan: "basico",
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         lastPurchase: {
