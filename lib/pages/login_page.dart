@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -69,6 +70,17 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> loginEmail() async {
     if (!mounted) return;
+
+    final email = emailCtrl.text.trim();
+    final password = passCtrl.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      setState(() {
+        error = 'Preencha e-mail e senha.';
+      });
+      return;
+    }
+
     setState(() {
       loading = true;
       error = null;
@@ -76,8 +88,8 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: emailCtrl.text.trim(),
-        password: passCtrl.text.trim(),
+        email: email,
+        password: password,
       );
 
       final user = cred.user;
@@ -121,7 +133,7 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
-      final googleSignIn = GoogleSignIn(scopes: ['email']);
+      final googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
 
       final signedInUser = await googleSignIn.signInSilently();
       if (signedInUser != null) {
@@ -129,12 +141,30 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       final googleUser = await googleSignIn.signIn();
-      if (googleUser == null) return; // usuário cancelou login
+      if (googleUser == null) {
+        // Usuário cancelou a tela de login do Google
+        if (mounted) setState(() => loading = false);
+        return;
+      }
 
       final googleAuth = await googleUser.authentication;
+      final idToken = googleAuth.idToken;
+      final accessToken = googleAuth.accessToken;
+
+      if (idToken == null || accessToken == null) {
+        if (mounted) {
+          setState(() {
+            loading = false;
+            error = 'Login com Google não retornou dados. '
+                'No Firebase Console, adicione a impressão digital SHA-1 do seu app (Android).';
+          });
+        }
+        return;
+      }
+
       final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
+        accessToken: accessToken,
+        idToken: idToken,
       );
 
       final cred =
@@ -157,10 +187,23 @@ class _LoginPageState extends State<LoginPage> {
       setState(() {
         error = _mapAuthError(e);
       });
+    } on PlatformException catch (e) {
+      if (!mounted) return;
+      final code = e.code;
+      final msg = e.message ?? '';
+      setState(() {
+        if (code == 'sign_in_failed' || msg.contains('DEVELOPER_ERROR') || msg.contains('12501')) {
+          error = 'Configuração do Google incorreta. '
+              'No Firebase Console, adicione a impressão digital SHA-1 do app Android e ative "Entrar com Google".';
+        } else {
+          error = 'Erro ao entrar com Google. ${msg.isNotEmpty ? msg : code}';
+        }
+      });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        error = 'Erro ao entrar com Google.';
+        error = 'Erro ao entrar com Google. '
+            'Confira no Firebase Console se o SHA-1 do app está cadastrado.';
       });
     } finally {
       if (mounted) {
