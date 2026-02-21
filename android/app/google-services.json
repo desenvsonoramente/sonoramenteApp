@@ -14,11 +14,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "314128969383-8t7bc2tgk2jm98sqk5drhltlhmnh4k1q.apps.googleusercontent.com",
+          "client_id": "314128969383-aohknp1h79hhj7j00irqvh3qejhlr5qd.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.sonoramente.app",
-            "certificate_hash": "8909c44168612b23a8f2a6ba33f076b108fc7ead"
+            "certificate_hash": "febe17bb51bc379ea7ac96f97230f2f0b1573edd"
           }
         },
         {
