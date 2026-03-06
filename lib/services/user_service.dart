@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -15,10 +14,8 @@ class UserService {
   UserService._internal();
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
 
-  // ✅ Sempre amarra no Firebase.app() + mesma região das functions deployadas
   final FirebaseFunctions _functions = FirebaseFunctions.instanceFor(
     app: Firebase.app(),
     region: 'us-central1',
@@ -29,7 +26,6 @@ class UserService {
 
   static const Duration _cacheTTL = Duration(minutes: 2);
 
-  // ✅ Cache do deviceId (evita chamadas repetidas e inconsistência)
   String? _cachedDeviceId;
   Future<String>? _deviceIdInFlight;
 
@@ -45,19 +41,19 @@ class UserService {
     return id;
   }
 
-  // =====================================================
-  // ================== AUDIO ACCESS ======================
-  // =====================================================
+  HttpsCallable _callable(String name) {
+    return _functions.httpsCallable(
+      name,
+      options: HttpsCallableOptions(timeout: const Duration(seconds: 20)),
+    );
+  }
 
   Future<bool> canAccessAudio({required AudioModel audio}) async {
     final user = _auth.currentUser;
     if (user == null) return false;
 
-    // 🔓 Conteúdo grátis: sempre libera
     if (audio.requiredBase == 'gratis') return true;
 
-    // ✅ Para qualquer coisa além de gratis:
-    // exige claims válidas + basePlan basico
     final claims = await _getClaimsSafe();
     final bool sessionValid = claims['sessionValid'] == true;
     final String basePlan = (claims['basePlan'] as String?) ?? 'gratis';
@@ -67,27 +63,23 @@ class UserService {
     if (!sessionValid) return false;
     if (basePlan != 'basico') return false;
 
-    // 🔒 DEVICE CHECK (login único) — exige deviceIdAtivo == deviceId local
     final userData = await _getUserDataSafe();
     if (userData == null) return false;
 
     final String currentDeviceId = await _getDeviceIdCached();
-    final String? deviceIdAtivo = (userData['deviceIdAtivo'] as String?)?.trim();
+    final String deviceIdAtivo =
+        (userData['deviceIdAtivo'] as String?)?.trim() ?? '';
 
-    if (deviceIdAtivo == null || deviceIdAtivo.isEmpty) return false;
+    if (deviceIdAtivo.isEmpty) return false;
     if (deviceIdAtivo != currentDeviceId) return false;
 
-    // Se não for explicitamente 'basico', bloqueia por padrão (conservador)
     if (audio.requiredBase != 'basico') return false;
 
-    // ✅ Conteúdo base do plano (sem addon)
     final String requiredAddon = audio.requiredAddon.trim();
     if (requiredAddon.isEmpty) return true;
 
-    // ✅ Conteúdo de pacote: precisa do addon
     if (claimAddons.contains(requiredAddon)) return true;
 
-    // Fallback no Firestore (caso claims ainda não propagaram)
     final List<String> dbAddons =
         (userData['addons'] as List? ?? const []).cast<String>();
     if (dbAddons.contains(requiredAddon)) return true;
@@ -95,12 +87,6 @@ class UserService {
     return false;
   }
 
-  // =====================================================
-  // ================== USER CREATION =====================
-  // =====================================================
-
-  // ✅ Produção definitiva: userDoc é criado no BACKEND (Auth Trigger).
-  // Mantido para compatibilidade: só garante deviceIdAtivo após login.
   Future<void> createUserIfNotExists({
     required String name,
     required String email,
@@ -109,123 +95,69 @@ class UserService {
     await setActiveDevice(deviceId: deviceId);
   }
 
-  // =====================================================
-  // ================== LOGIN ÚNICO =======================
-  // =====================================================
-
-  /// ✅ Chame após login (email ou google).
-  /// Atualiza o deviceIdAtivo do usuário.
   Future<void> setActiveDevice({required String deviceId}) async {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    final uid = user.uid;
-    final ref = _firestore.collection('users').doc(uid);
-
-    // Atualiza cache local também
     _cachedDeviceId = deviceId;
 
-    try {
-      await ref.set({
-        'deviceIdAtivo': deviceId,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    } on FirebaseException catch (e) {
-      // Se App Check/Rules negarem, não crasha
-      if (e.code == 'permission-denied') {
-        clearCache();
-        return;
-      }
-      rethrow;
-    }
+    await _callable('setActiveDevice').call({
+      'deviceId': deviceId,
+    });
 
     clearCache();
   }
-
-  // =====================================================
-  // ================== DELETE ACCOUNT ====================
-  // =====================================================
 
   Future<void> deleteAccount() async {
     final user = _auth.currentUser;
     if (user == null) return;
 
     try {
-      final callable = _functions.httpsCallable(
-        'deleteAccount',
-        options: HttpsCallableOptions(timeout: const Duration(seconds: 60)),
-      );
-
-      await callable.call();
-
-      // ✅ Mesmo com sucesso no backend, limpa completamente a sessão local
+      await _callable('deleteAccount').call();
       await signOut();
     } on FirebaseFunctionsException catch (e) {
       final msg = (e.message == null || e.message!.isEmpty)
           ? 'Não foi possível excluir sua conta agora. Tente novamente.'
           : e.message!;
-
       throw Exception(msg);
     }
   }
-
-  // =====================================================
-  // ================== CACHE ==============================
-  // =====================================================
 
   void clearCache() {
     _cachedUser = null;
     _fetchedAt = null;
   }
 
-  // =====================================================
-  // ================== SIGN OUT ===========================
-  // =====================================================
-
   Future<void> signOut() async {
     clearCache();
     _cachedDeviceId = null;
     _deviceIdInFlight = null;
 
-    // ✅ Primeiro tenta encerrar a sessão Google local
     try {
       final isSignedInWithGoogle = await _googleSignIn.isSignedIn();
       if (isSignedInWithGoogle) {
         await _googleSignIn.signOut();
       }
-    } catch (_) {
-      // não quebra logout por causa disso
-    }
+    } catch (_) {}
 
-    // ✅ Depois encerra o FirebaseAuth local
     try {
       await _auth.signOut();
-    } catch (_) {
-      // não quebra fluxo
-    }
+    } catch (_) {}
   }
-
-  // =====================================================
-  // ================== PUBLIC =============================
-  // =====================================================
 
   Future<Map<String, dynamic>?> getUserData() async {
     return _getUserDataSafe();
   }
 
-  /// ✅ Força refresh de claims (use após compra/restore se quiser)
   Future<Map<String, dynamic>> refreshClaims() async {
     final user = _auth.currentUser;
     if (user == null) return {};
 
     await user.getIdToken(true);
     final token = await user.getIdTokenResult(true);
+    clearCache();
     return token.claims ?? {};
   }
-
-  // =====================================================
-  // ================== PRIVATE ============================
-  // =====================================================
 
   Future<Map<String, dynamic>> _getClaimsSafe() async {
     final user = _auth.currentUser;
@@ -249,20 +181,21 @@ class UserService {
       return _cachedUser;
     }
 
-    final uid = user.uid;
-
     try {
-      final snap = await _firestore.collection('users').doc(uid).get();
-      if (!snap.exists) return null;
+      final result = await _callable('getUserProfile').call();
+      final data = Map<String, dynamic>.from(
+        (result.data as Map?) ?? const {},
+      );
 
-      _cachedUser = snap.data();
+      if (data.isEmpty) return null;
+
+      _cachedUser = data;
       _fetchedAt = DateTime.now();
       return _cachedUser;
-    } on FirebaseException catch (e) {
-      if (e.code == 'permission-denied') {
-        return null;
-      }
-      rethrow;
+    } on FirebaseFunctionsException {
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 }

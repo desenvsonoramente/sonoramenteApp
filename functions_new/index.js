@@ -1,6 +1,6 @@
 /**
  * Firebase Functions – Produção
- * - callables v2: claimPurchase, setActiveDevice, deleteAccount
+ * - callables v2: getUserProfile, claimPurchase, setActiveDevice, deleteAccount
  * - trigger auth v1: createUserDoc
  */
 
@@ -25,7 +25,7 @@ const PACKAGE_NAME = "com.sonoramente.app";
 const PLAY_SA =
   "google-play-validation@sonoramente-a7432.iam.gserviceaccount.com";
 
-// ✅ Produção: recomendo TRUE
+// ✅ Produção
 const ENFORCE_APP_CHECK = true;
 
 // ✅ Whitelist de produtos Android (produção)
@@ -186,7 +186,7 @@ exports.createUserDoc = functionsV1
           basePlan: existingBasePlan,
           addons: existingAddons,
 
-          // ✅ CRÍTICO: preserva o deviceIdAtivo se já tiver sido gravado
+          // ✅ preserva sessão já gravada
           deviceIdAtivo: existingDeviceIdAtivo,
 
           // ✅ preserva createdAt se já existir
@@ -211,6 +211,85 @@ exports.createUserDoc = functionsV1
       throw e;
     }
   });
+
+// =====================================================
+// ================== GET USER PROFILE (v2) =============
+// =====================================================
+exports.getUserProfile = onCall(
+  {
+    region: REGION,
+    enforceAppCheck: ENFORCE_APP_CHECK,
+    serviceAccount: PLAY_SA,
+  },
+  async (request) => {
+    logRequestContext("getUserProfile", request);
+
+    try {
+      if (ENFORCE_APP_CHECK && !request.app) {
+        throw new HttpsError(
+          "failed-precondition",
+          "App Check inválido. Instale/atualize pela Play Store e tente novamente."
+        );
+      }
+
+      if (!request.auth?.uid) {
+        throw new HttpsError("unauthenticated", "Usuário não autenticado.");
+      }
+
+      const uid = request.auth.uid;
+      const ref = admin.firestore().collection("users").doc(uid);
+      const snap = await ref.get();
+
+      if (!snap.exists) {
+        logger.info("ℹ️ getUserProfile | doc ausente", { uid });
+        return {};
+      }
+
+      const data = snap.data() || {};
+
+      logger.info("✅ getUserProfile ok", {
+        uid,
+        hasDeviceIdAtivo:
+          typeof data.deviceIdAtivo === "string" && data.deviceIdAtivo.trim() !== "",
+        basePlan: typeof data.basePlan === "string" ? data.basePlan : null,
+        addonsCount: Array.isArray(data.addons) ? data.addons.length : 0,
+        ts: nowIso(),
+      });
+
+      return {
+        uid: data.uid ?? uid,
+        name: typeof data.name === "string" ? data.name : "",
+        email: typeof data.email === "string" ? data.email : "",
+        photoURL: typeof data.photoURL === "string" ? data.photoURL : "",
+        basePlan: typeof data.basePlan === "string" ? data.basePlan : "gratis",
+        addons: Array.isArray(data.addons) ? data.addons : [],
+        deviceIdAtivo:
+          typeof data.deviceIdAtivo === "string" ? data.deviceIdAtivo : "",
+        lastPurchase: data.lastPurchase ?? null,
+      };
+    } catch (error) {
+      if (error instanceof HttpsError) {
+        logger.error("❌ getUserProfile HttpsError", {
+          code: error.code,
+          message: error.message,
+          details: error.details ?? null,
+          ts: nowIso(),
+          runtimeProjectId: getRuntimeProjectId(),
+        });
+        throw error;
+      }
+
+      logger.error("❌ getUserProfile erro não tratado", {
+        message: error?.message ?? String(error),
+        stack: error?.stack ?? null,
+        ts: nowIso(),
+        runtimeProjectId: getRuntimeProjectId(),
+      });
+
+      throw new HttpsError("internal", "Erro interno ao obter perfil do usuário.");
+    }
+  }
+);
 
 // =====================================================
 // ================== SET ACTIVE DEVICE (v2) ============

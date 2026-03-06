@@ -79,6 +79,15 @@ class _SessionGuardState extends State<SessionGuard> {
     _listenAuth();
   }
 
+  void _clearPendingMismatch([String reason = '']) {
+    if (_pendingMismatch || _pendingRef != null) {
+      _log('clear pending mismatch | reason=$reason');
+    }
+    _pendingMismatch = false;
+    _pendingRef = null;
+    _pendingMessage = 'Sua conta foi acessada em outro dispositivo.';
+  }
+
   void _onPurchaseGuardChanged() {
     final locked = _purchaseGuard.isLocked;
     _log('PurchaseGuard changed | locked=$locked pendingMismatch=$_pendingMismatch');
@@ -105,7 +114,7 @@ class _SessionGuardState extends State<SessionGuard> {
     final ref = _pendingRef;
     if (ref == null) {
       _warn('_schedulePendingConfirm() no pendingRef -> clear pending');
-      _pendingMismatch = false;
+      _clearPendingMismatch('pendingRef null');
       return;
     }
 
@@ -121,8 +130,6 @@ class _SessionGuardState extends State<SessionGuard> {
 
       _log('pending confirm firing | reason=$reason path=${ref.path}');
       await _confirmAndMaybeKick(ref: ref, message: _pendingMessage);
-
-      // Se confirmou (e não kickou), limpamos pending aqui dentro do confirm
     });
   }
 
@@ -141,9 +148,7 @@ class _SessionGuardState extends State<SessionGuard> {
     _pendingDebounce?.cancel();
     _pendingDebounce = null;
 
-    _pendingMismatch = false;
-    _pendingRef = null;
-    _pendingMessage = 'Sua conta foi acessada em outro dispositivo.';
+    _clearPendingMismatch('user null');
   }
 
   Future<void> _cancelUserSub(String reason) async {
@@ -177,8 +182,7 @@ class _SessionGuardState extends State<SessionGuard> {
 
       _pendingDebounce?.cancel();
       _pendingDebounce = null;
-      _pendingMismatch = false;
-      _pendingRef = null;
+      _clearPendingMismatch('auth changed');
 
       // Reset quando desloga
       if (user == null) {
@@ -229,8 +233,15 @@ class _SessionGuardState extends State<SessionGuard> {
           'pendingWrites=${snap.metadata.hasPendingWrites} authUid=$uidNow armed=$_armed locked=${_purchaseGuard.isLocked}',
         );
 
+        // Se auth mudou, não toma ação com snapshot antigo
+        if (uidNow == null || uidNow != _armedUid) {
+          _warn('snapshot: auth uid changed -> ignore | uidNow=$uidNow armedUid=$_armedUid');
+          return;
+        }
+
         // Se doc ainda não existe, não derruba
         if (!snap.exists) {
+          _clearPendingMismatch('doc not exists');
           _log('snapshot: doc does not exist yet -> ignore');
           return;
         }
@@ -267,12 +278,6 @@ class _SessionGuardState extends State<SessionGuard> {
           return;
         }
 
-        // Se auth mudou, não toma ação com snapshot antigo
-        if (uidNow == null || uidNow != _armedUid) {
-          _warn('snapshot: auth uid changed -> ignore | uidNow=$uidNow armedUid=$_armedUid');
-          return;
-        }
-
         // Se mismatch...
         if (active != current) {
           _warn('snapshot mismatch detected | active="$active" current="$current"');
@@ -292,12 +297,7 @@ class _SessionGuardState extends State<SessionGuard> {
             message: 'Sua conta foi acessada em outro dispositivo.',
           );
         } else {
-          // ✅ Se voltou ao normal, limpa pendência
-          if (_pendingMismatch) {
-            _log('snapshot match -> clearing pending mismatch');
-          }
-          _pendingMismatch = false;
-          _pendingRef = null;
+          _clearPendingMismatch('snapshot match');
           _log('snapshot match | OK');
         }
       }, onError: (e) {
@@ -344,6 +344,7 @@ class _SessionGuardState extends State<SessionGuard> {
       _log('server get done | exists=${serverSnap.exists}');
 
       if (!serverSnap.exists) {
+        _clearPendingMismatch('server doc not exists');
         _log('server: doc not exists -> ignore');
         return;
       }
@@ -385,9 +386,8 @@ class _SessionGuardState extends State<SessionGuard> {
         _warn('server mismatch CONFIRMED -> kick | active="$active" current="$current"');
         await _kickToLogin(message: message);
       } else {
-        _log('server match -> no kick (clear pending)');
-        _pendingMismatch = false;
-        _pendingRef = null;
+        _clearPendingMismatch('server match');
+        _log('server match -> no kick');
       }
     } on FirebaseException catch (e) {
       _err('_confirmAndMaybeKick() FirebaseException | code=${e.code} msg=${e.message}');

@@ -24,6 +24,21 @@ class _LoginPageState extends State<LoginPage> {
 
   String _appVersion = '';
 
+  void _log(String msg) {
+    // ignore: avoid_print
+    print('🔐 [LoginPage] $msg');
+  }
+
+  void _warn(String msg) {
+    // ignore: avoid_print
+    print('⚠️ [LoginPage] $msg');
+  }
+
+  void _err(String msg) {
+    // ignore: avoid_print
+    print('❌ [LoginPage] $msg');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -37,8 +52,8 @@ class _LoginPageState extends State<LoginPage> {
       setState(() {
         _appVersion = '${info.version} (${info.buildNumber})';
       });
-    } catch (_) {
-      // se falhar, apenas não mostra
+    } catch (e) {
+      _warn('_loadVersion() falhou | $e');
     }
   }
 
@@ -61,13 +76,18 @@ class _LoginPageState extends State<LoginPage> {
         return 'Conta desativada.';
       case 'too-many-requests':
         return 'Muitas tentativas. Tente mais tarde.';
+      case 'invalid-credential':
+        return 'E-mail ou senha inválidos.';
       default:
         return 'Erro ao fazer login.';
     }
   }
 
   Future<void> _syncUserOnBackend(User user) async {
+    _log('_syncUserOnBackend() start | uid=${user.uid} email=${user.email}');
+
     final deviceId = await DeviceService.getDeviceId();
+    _log('_syncUserOnBackend() deviceId=$deviceId');
 
     await UserService()
         .createUserIfNotExists(
@@ -76,6 +96,8 @@ class _LoginPageState extends State<LoginPage> {
           deviceId: deviceId,
         )
         .timeout(const Duration(seconds: 12));
+
+    _log('_syncUserOnBackend() ok | uid=${user.uid}');
   }
 
   // ================= LOGIN EMAIL =================
@@ -99,26 +121,43 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
+      _log('loginEmail() start | email=$email');
+
       final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
 
       final user = cred.user;
-      if (user == null) throw Exception('Login falhou');
+      if (user == null) {
+        throw Exception('Login falhou: user=null');
+      }
+
+      _log('loginEmail() auth ok | uid=${user.uid}');
 
       try {
         await _syncUserOnBackend(user);
-      } catch (_) {
-        // Não bloqueia a entrada no app.
-        // A HomePage fará nova tentativa em background.
+      } catch (e) {
+        _err('loginEmail() backend sync falhou | uid=${user.uid} | $e');
+
+        if (!mounted) return;
+        setState(() {
+          error =
+              'Login realizado, mas houve falha ao sincronizar sua sessão. Tente novamente.';
+        });
+
+        // ✅ Aqui NÃO fazemos signOut automático.
+        // O motivo é: o problema precisa aparecer claramente,
+        // em vez de mascarar como “volta para tela de login”.
       }
     } on FirebaseAuthException catch (e) {
+      _err('loginEmail() FirebaseAuthException | code=${e.code} msg=${e.message}');
       if (!mounted) return;
       setState(() {
         error = _mapAuthError(e);
       });
-    } catch (_) {
+    } catch (e) {
+      _err('loginEmail() erro inesperado | $e');
       if (!mounted) return;
       setState(() {
         error = 'Erro inesperado.';
@@ -129,6 +168,7 @@ class _LoginPageState extends State<LoginPage> {
           loading = false;
         });
       }
+      _log('loginEmail() end');
     }
   }
 
@@ -136,35 +176,49 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> loginGoogle() async {
     if (!mounted) return;
+
     setState(() {
       loading = true;
       error = null;
     });
 
     try {
-      final googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+      _log('loginGoogle() start');
+
+      final googleSignIn = GoogleSignIn(
+        scopes: ['email', 'profile'],
+      );
 
       final signedInUser = await googleSignIn.signInSilently();
       if (signedInUser != null) {
+        _log('loginGoogle() havia sessão anterior Google -> signOut');
         await googleSignIn.signOut();
       }
 
       final googleUser = await googleSignIn.signIn();
       if (googleUser == null) {
-        if (mounted) setState(() => loading = false);
+        _warn('loginGoogle() cancelado pelo usuário');
+        if (mounted) {
+          setState(() {
+            loading = false;
+          });
+        }
         return;
       }
+
+      _log('loginGoogle() googleUser ok | email=${googleUser.email}');
 
       final googleAuth = await googleUser.authentication;
       final idToken = googleAuth.idToken;
       final accessToken = googleAuth.accessToken;
 
       if (idToken == null || accessToken == null) {
+        _warn('loginGoogle() idToken/accessToken ausente');
         if (mounted) {
           setState(() {
             loading = false;
-            error = 'Login com Google não retornou dados. '
-                'No Firebase Console, adicione a impressão digital SHA-1 do seu app (Android).';
+            error =
+                'Login com Google não retornou dados. No Firebase Console, adicione a impressão digital SHA-1 do seu app Android.';
           });
         }
         return;
@@ -179,38 +233,55 @@ class _LoginPageState extends State<LoginPage> {
           await FirebaseAuth.instance.signInWithCredential(credential);
 
       final user = cred.user;
-      if (user == null) throw Exception('Google login falhou');
+      if (user == null) {
+        throw Exception('Google login falhou: user=null');
+      }
+
+      _log('loginGoogle() auth ok | uid=${user.uid}');
 
       try {
         await _syncUserOnBackend(user);
-      } catch (_) {
-        // Não bloqueia a entrada no app.
-        // A HomePage fará nova tentativa em background.
+      } catch (e) {
+        _err('loginGoogle() backend sync falhou | uid=${user.uid} | $e');
+
+        if (!mounted) return;
+        setState(() {
+          error =
+              'Login realizado, mas houve falha ao sincronizar sua sessão. Tente novamente.';
+        });
+
+        // ✅ Mesmo comportamento do login email:
+        // não derruba silenciosamente, mostra erro real.
       }
     } on FirebaseAuthException catch (e) {
+      _err('loginGoogle() FirebaseAuthException | code=${e.code} msg=${e.message}');
       if (!mounted) return;
       setState(() {
         error = _mapAuthError(e);
       });
     } on PlatformException catch (e) {
+      _err('loginGoogle() PlatformException | code=${e.code} msg=${e.message}');
       if (!mounted) return;
+
       final code = e.code;
       final msg = e.message ?? '';
+
       setState(() {
         if (code == 'sign_in_failed' ||
             msg.contains('DEVELOPER_ERROR') ||
             msg.contains('12501')) {
-          error = 'Configuração do Google incorreta. '
-              'No Firebase Console, adicione a impressão digital SHA-1 do app Android e ative "Entrar com Google".';
+          error =
+              'Configuração do Google incorreta. No Firebase Console, adicione a impressão digital SHA-1 do app Android e ative "Entrar com Google".';
         } else {
           error = 'Erro ao entrar com Google. ${msg.isNotEmpty ? msg : code}';
         }
       });
-    } catch (_) {
+    } catch (e) {
+      _err('loginGoogle() erro inesperado | $e');
       if (!mounted) return;
       setState(() {
-        error = 'Erro ao entrar com Google. '
-            'Confira no Firebase Console se o SHA-1 do app está cadastrado.';
+        error =
+            'Erro ao entrar com Google. Confira no Firebase Console se o SHA-1 do app está cadastrado.';
       });
     } finally {
       if (mounted) {
@@ -218,6 +289,7 @@ class _LoginPageState extends State<LoginPage> {
           loading = false;
         });
       }
+      _log('loginGoogle() end');
     }
   }
 
@@ -241,7 +313,10 @@ class _LoginPageState extends State<LoginPage> {
               children: [
                 const Text(
                   'Entrar',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -295,7 +370,10 @@ class _LoginPageState extends State<LoginPage> {
                 if (_appVersion.isNotEmpty)
                   Text(
                     'v$_appVersion',
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.black54,
+                    ),
                   ),
               ],
             ),
