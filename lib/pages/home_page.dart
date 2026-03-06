@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -6,6 +8,7 @@ import '../components/mood_card.dart';
 import '../pages/profile_page.dart';
 import '../pages/premium_page.dart';
 import '../services/user_service.dart';
+import '../services/device_service.dart';
 import 'audio_list_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -20,21 +23,70 @@ class _HomePageState extends State<HomePage> {
   final Color bgColor = const Color(0xFFA8C3B0);
 
   final UserService _userService = UserService();
+
   User? user;
 
-  // ✅ Estado “inteligente” do plano (via claims)
   bool _claimsLoading = true;
   bool _sessionValid = false;
-  String _basePlan = 'gratis'; // gratis | basico | premium (ou o que você usar)
+  String _basePlan = 'gratis';
+
+  StreamSubscription<User?>? _idTokenSub;
 
   @override
   void initState() {
     super.initState();
+
     user = FirebaseAuth.instance.currentUser;
-    _loadClaims();
+
+    _idTokenSub = FirebaseAuth.instance.idTokenChanges().listen((u) {
+      user = u;
+
+      if (u == null) {
+        if (!mounted) return;
+        setState(() {
+          _claimsLoading = false;
+          _sessionValid = false;
+          _basePlan = 'gratis';
+        });
+        return;
+      }
+
+      _ensureActiveDeviceSilently();
+      _loadClaims(forceRefresh: false);
+    });
+
+    _ensureActiveDeviceSilently();
+    _loadClaims(forceRefresh: true);
   }
 
-  Future<void> _loadClaims() async {
+  @override
+  void dispose() {
+    _idTokenSub?.cancel();
+    _idTokenSub = null;
+    super.dispose();
+  }
+
+  Future<void> _ensureActiveDeviceSilently() async {
+    try {
+      final u = FirebaseAuth.instance.currentUser;
+      if (u == null) return;
+
+      final deviceId = await DeviceService.getDeviceId();
+
+      await _userService
+          .createUserIfNotExists(
+            name: u.displayName ?? '',
+            email: u.email ?? '',
+            deviceId: deviceId,
+          )
+          .timeout(const Duration(seconds: 12));
+    } catch (_) {
+      // silencioso: não trava a Home
+    }
+  }
+
+  Future<void> _loadClaims({required bool forceRefresh}) async {
+    if (!mounted) return;
     setState(() => _claimsLoading = true);
 
     try {
@@ -49,8 +101,7 @@ class _HomePageState extends State<HomePage> {
         return;
       }
 
-      // Pega claims do token (não precisa de context)
-      final token = await u.getIdTokenResult();
+      final token = await u.getIdTokenResult(forceRefresh);
       final claims = token.claims ?? {};
 
       final sessionValid = claims['sessionValid'] == true;
@@ -63,7 +114,6 @@ class _HomePageState extends State<HomePage> {
         _claimsLoading = false;
       });
     } catch (_) {
-      // Se der erro, assume não-premium (conservador)
       if (!mounted) return;
       setState(() {
         _sessionValid = false;
@@ -74,7 +124,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   bool get _isPremium {
-    // Ajuste se seus nomes de plano forem diferentes
     return _sessionValid && _basePlan != 'gratis';
   }
 
@@ -103,14 +152,11 @@ class _HomePageState extends State<HomePage> {
       leading: IconButton(
         icon: const Icon(Icons.menu, color: Colors.black),
         onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-      )
+      ),
     );
   }
 
   Drawer _buildDrawer() {
-    // Mostra “Seja Premium” somente se:
-    // - claims já carregaram
-    // - e o usuário NÃO é premium
     final showPremiumButton = !_claimsLoading && !_isPremium;
 
     return Drawer(
@@ -131,7 +177,6 @@ class _HomePageState extends State<HomePage> {
               child: Icon(Icons.person, color: Colors.black),
             ),
           ),
-
           if (showPremiumButton) ...[
             ListTile(
               leading: const Icon(Icons.star, color: Colors.amber),
@@ -139,18 +184,17 @@ class _HomePageState extends State<HomePage> {
               subtitle: const Text('Desbloqueie todos os áudios'),
               onTap: () {
                 Navigator.pop(context);
+
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const PremiumPage()),
-                ).then((_) {
-                  // Quando voltar da tela Premium, atualiza claims
-                  _loadClaims();
+                ).then((_) async {
+                  await _loadClaims(forceRefresh: true);
                 });
               },
             ),
             const Divider(height: 1),
           ],
-
           ListTile(
             leading: const Icon(Icons.person),
             title: const Text('Perfil'),
@@ -162,7 +206,6 @@ class _HomePageState extends State<HomePage> {
               );
             },
           ),
-
           ListTile(
             leading: const Icon(Icons.logout),
             title: const Text('Logout'),

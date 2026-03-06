@@ -1,6 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+
 import '../services/in_app_purchase_service.dart';
 
 class PremiumPage extends StatefulWidget {
@@ -16,60 +18,48 @@ class _PremiumPageState extends State<PremiumPage> {
   List<ProductDetails> products = [];
   bool loading = true;
   bool purchasing = false;
+
+  // Plano atual (lido do Firestore users/{uid})
   String basePlan = 'gratis';
 
-  // ================= DIAGNÓSTICO (TELA) =================
-  bool showDebug = false;
+  // IAP
   bool iapAvailable = false;
-  String lastEvent = '';
-  String lastEventType = ''; // 'success' | 'error' | ''
+
+  StreamSubscription<String>? _successSub;
+  StreamSubscription<String>? _errorSub;
 
   @override
   void initState() {
     super.initState();
+    _listenFeedback();
     _initialize();
   }
 
   @override
   void dispose() {
+    _successSub?.cancel();
+    _errorSub?.cancel();
     service.dispose();
     super.dispose();
   }
 
-  Future<void> _initialize() async {
-    iapAvailable = await service.checkAvailability();
-    await service.initialize();
-    _listenFeedback();
-    await _loadData();
-  }
-
-  Future<void> _loadData() async {
-    products = await service.loadProducts(); // por padrão só basicProductId
-    final access = await service.loadUserAccess();
-    basePlan = access['basePlan'] ?? 'gratis';
-    if (!mounted) return;
-    setState(() => loading = false);
-  }
-
   void _listenFeedback() {
-    service.onSuccess.listen((msg) async {
-      lastEvent = msg;
-      lastEventType = 'success';
-
+    _successSub = service.onSuccess.listen((msg) async {
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), backgroundColor: Colors.green),
       );
 
+      // Recarrega dados após sucesso
       await _loadData();
+
       if (mounted) setState(() => purchasing = false);
     });
 
-    service.onError.listen((msg) {
-      lastEvent = msg;
-      lastEventType = 'error';
-
+    _errorSub = service.onError.listen((msg) {
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), backgroundColor: Colors.red),
       );
@@ -78,7 +68,34 @@ class _PremiumPageState extends State<PremiumPage> {
     });
   }
 
-  ProductDetails? _findBasic() {
+  Future<void> _initialize() async {
+    if (!mounted) return;
+    setState(() => loading = true);
+
+    try {
+      final available = await service.checkAvailability();
+      if (!mounted) return;
+      setState(() => iapAvailable = available);
+
+      await service.initialize();
+      await _loadData();
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> _loadData() async {
+    final loadedProducts = await service.loadProducts(); // por padrão só o produto base
+    final access = await service.loadUserAccess();
+
+    if (!mounted) return;
+    setState(() {
+      products = loadedProducts;
+      basePlan = (access['basePlan'] as String?) ?? 'gratis';
+    });
+  }
+
+  ProductDetails? _findBaseProduct() {
     try {
       return products.firstWhere(
         (p) => p.id == InAppPurchaseService.paidBaseProductId,
@@ -89,26 +106,25 @@ class _PremiumPageState extends State<PremiumPage> {
   }
 
   bool get hasBasic => basePlan == 'basico';
-
-  bool get hasBasicProductLoaded => _findBasic() != null;
+  bool get hasBaseProductLoaded => _findBaseProduct() != null;
 
   bool get canAttemptPurchase =>
-      !loading && !purchasing && !hasBasic && iapAvailable && hasBasicProductLoaded;
+      !loading && !purchasing && !hasBasic && iapAvailable && hasBaseProductLoaded;
 
   String _buttonLabel() {
     if (hasBasic) return 'Plano ativo';
     if (!iapAvailable) return 'Compras indisponíveis neste aparelho';
-    if (!hasBasicProductLoaded) return 'Produto não carregou da Play Store';
-    final p = _findBasic();
+    if (!hasBaseProductLoaded) return 'Produto não carregou da Play Store';
+
+    final p = _findBaseProduct();
     if (p == null) return 'Desbloquear agora';
     return 'Desbloquear por ${p.price}';
-    // Se quiser “Desbloquear agora” sem preço, troca aqui.
   }
 
-  Future<void> _purchaseBasic() async {
+  Future<void> _purchaseBase() async {
     if (!canAttemptPurchase) return;
 
-    final product = _findBasic();
+    final product = _findBaseProduct();
     if (product == null) return;
 
     if (!mounted) return;
@@ -119,6 +135,7 @@ class _PremiumPageState extends State<PremiumPage> {
     } catch (_) {
       if (!mounted) return;
       setState(() => purchasing = false);
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Falha ao iniciar pagamento.'),
@@ -128,48 +145,23 @@ class _PremiumPageState extends State<PremiumPage> {
     }
   }
 
-  // ================= DIAGNÓSTICO: TEXTO E AÇÕES =================
+  Future<void> _restore() async {
+    if (purchasing) return;
+    setState(() => purchasing = true);
 
-  String _diagnosticText() {
-    final foundIds = products.map((p) => p.id).toList();
-    final basic = _findBasic();
+    try {
+      await service.restorePurchases();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => purchasing = false);
 
-    return [
-      'DIAGNÓSTICO (PremiumPage)',
-      '--------------------------------',
-      'IAP disponível (isAvailable): $iapAvailable',
-      'Produto esperado: ${InAppPurchaseService.paidBaseProductId}',
-      'Produto carregou: ${basic != null}',
-      if (basic != null) 'Preço: ${basic.price} (${basic.currencyCode})',
-      'BasePlan (Firestore): $basePlan',
-      'Produtos retornados: $foundIds',
-      'Pode tentar compra (canAttemptPurchase): $canAttemptPurchase',
-      'Último evento: ${lastEventType.isEmpty ? "-" : lastEventType.toUpperCase()}',
-      'Mensagem: ${lastEvent.isEmpty ? "-" : lastEvent}',
-      '--------------------------------',
-      'DICA: se isAvailable=false => problema do dispositivo/emulador.',
-      'DICA: se produto não carrega => app não instalado pela Play / conta não testadora / produto não ativo.',
-    ].join('\n');
-  }
-
-  Future<void> _copyDiagnostic() async {
-    final text = _diagnosticText();
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Diagnóstico copiado. Cole aqui no chat.'),
-        backgroundColor: Colors.black87,
-      ),
-    );
-  }
-
-  Future<void> _refreshDiagnostic() async {
-    setState(() => loading = true);
-    iapAvailable = await service.checkAvailability();
-    await _loadData();
-    if (!mounted) return;
-    setState(() => loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Não foi possível restaurar compras.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
@@ -181,20 +173,12 @@ class _PremiumPageState extends State<PremiumPage> {
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.grey),
         title: const Text('Plano Premium', style: TextStyle(color: Colors.black)),
-        actions: [
-          IconButton(
-            tooltip: showDebug ? 'Ocultar diagnóstico' : 'Ver diagnóstico',
-            icon: Icon(showDebug ? Icons.bug_report : Icons.bug_report_outlined),
-            onPressed: () => setState(() => showDebug = !showDebug),
-          ),
-        ],
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : Stack(
               children: [
                 _buildContent(),
-                if (showDebug) _buildDebugPanel(),
                 if (purchasing) _buildLoading(),
               ],
             ),
@@ -204,7 +188,7 @@ class _PremiumPageState extends State<PremiumPage> {
   Widget _buildContent() {
     final disabledReason = (!iapAvailable)
         ? 'Compras indisponíveis neste aparelho.'
-        : (!hasBasicProductLoaded)
+        : (!hasBaseProductLoaded)
             ? 'Não consegui carregar o produto na Play Store.'
             : '';
 
@@ -233,7 +217,7 @@ class _PremiumPageState extends State<PremiumPage> {
             borderRadius: BorderRadius.circular(28),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
+                color: Colors.black.withOpacity(0.05),
                 blurRadius: 12,
                 offset: const Offset(0, 6),
               ),
@@ -258,30 +242,24 @@ class _PremiumPageState extends State<PremiumPage> {
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton(
-                  onPressed: canAttemptPurchase ? _purchaseBasic : null,
+                  onPressed: canAttemptPurchase ? _purchaseBase : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFA8C3B0),
-                    disabledBackgroundColor: const Color(0xFFA8C3B0).withValues(alpha: 0.35),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    disabledBackgroundColor:
+                        const Color(0xFFA8C3B0).withOpacity(0.35),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
                   ),
-                  child: purchasing
-                      ? const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            ),
-                            SizedBox(width: 12),
-                            Text('Processando...'),
-                          ],
-                        )
-                      : Text(
-                          _buttonLabel(),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black),
-                        ),
+                  child: Text(
+                    _buttonLabel(),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -289,89 +267,11 @@ class _PremiumPageState extends State<PremiumPage> {
         ),
         const SizedBox(height: 24),
         TextButton(
-          onPressed: purchasing ? null : service.restorePurchases,
+          onPressed: purchasing ? null : _restore,
           style: TextButton.styleFrom(foregroundColor: Colors.black),
           child: const Text('Restaurar compras'),
         ),
       ],
-    );
-  }
-
-  Widget _buildDebugPanel() {
-    final diag = _diagnosticText();
-
-    Color chipColor() {
-      if (lastEventType == 'success') return Colors.green;
-      if (lastEventType == 'error') return Colors.red;
-      return Colors.grey;
-    }
-
-    String chipLabel() {
-      if (lastEventType == 'success') return 'SUCESSO';
-      if (lastEventType == 'error') return 'ERRO';
-      return 'SEM EVENTO';
-    }
-
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: Container(
-        margin: const EdgeInsets.all(12),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.12),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Chip(
-                  label: Text(chipLabel(), style: const TextStyle(color: Colors.white)),
-                  backgroundColor: chipColor(),
-                ),
-                const Spacer(),
-                IconButton(
-                  tooltip: 'Recarregar dados',
-                  icon: const Icon(Icons.refresh),
-                  onPressed: loading ? null : _refreshDiagnostic,
-                ),
-                IconButton(
-                  tooltip: 'Copiar diagnóstico',
-                  icon: const Icon(Icons.copy),
-                  onPressed: _copyDiagnostic,
-                ),
-                IconButton(
-                  tooltip: 'Fechar',
-                  icon: const Icon(Icons.close),
-                  onPressed: () => setState(() => showDebug = false),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 180,
-              child: SingleChildScrollView(
-                child: Text(
-                  diag,
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 12,
-                    height: 1.25,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -384,7 +284,7 @@ class _PremiumPageState extends State<PremiumPage> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: const Color(0xFFA8C3B0).withValues(alpha: 0.1),
+              color: const Color(0xFFA8C3B0).withOpacity(0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, color: const Color(0xFFA8C3B0)),

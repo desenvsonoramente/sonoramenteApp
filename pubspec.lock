@@ -361,6 +361,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.17.5"
+  firebase_installations:
+    dependency: "direct main"
+    description:
+      name: firebase_installations
+      sha256: "81493183261ef4cc60cf615f329c0a60055ff1d6c9ac574104b1933927f53c84"
+      url: "https://pub.dev"
+    source: hosted
+    version: "16.3.6"
   firebase_storage:
     dependency: "direct main"
     description:
@@ -600,6 +608,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.4.7"
+  installer_info:
+    dependency: "direct main"
+    description:
+      name: installer_info
+      sha256: "43630c48614dd0086ce51803e90073e5a4d2519b1b97366879878445603ce5e8"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.0"
   intl:
     dependency: "direct main"
     description:

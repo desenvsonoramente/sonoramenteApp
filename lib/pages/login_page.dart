@@ -66,6 +66,18 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  Future<void> _syncUserOnBackend(User user) async {
+    final deviceId = await DeviceService.getDeviceId();
+
+    await UserService()
+        .createUserIfNotExists(
+          name: user.displayName ?? '',
+          email: user.email ?? '',
+          deviceId: deviceId,
+        )
+        .timeout(const Duration(seconds: 12));
+  }
+
   // ================= LOGIN EMAIL =================
 
   Future<void> loginEmail() async {
@@ -95,15 +107,12 @@ class _LoginPageState extends State<LoginPage> {
       final user = cred.user;
       if (user == null) throw Exception('Login falhou');
 
-      final deviceId = await DeviceService.getDeviceId();
-
-      await UserService().createUserIfNotExists(
-        name: user.displayName ?? '',
-        email: user.email ?? '',
-        deviceId: deviceId,
-      );
-
-      await UserService().setActiveDevice(deviceId: deviceId);
+      try {
+        await _syncUserOnBackend(user);
+      } catch (_) {
+        // Não bloqueia a entrada no app.
+        // A HomePage fará nova tentativa em background.
+      }
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -142,7 +151,6 @@ class _LoginPageState extends State<LoginPage> {
 
       final googleUser = await googleSignIn.signIn();
       if (googleUser == null) {
-        // Usuário cancelou a tela de login do Google
         if (mounted) setState(() => loading = false);
         return;
       }
@@ -173,15 +181,12 @@ class _LoginPageState extends State<LoginPage> {
       final user = cred.user;
       if (user == null) throw Exception('Google login falhou');
 
-      final deviceId = await DeviceService.getDeviceId();
-
-      await UserService().createUserIfNotExists(
-        name: user.displayName ?? '',
-        email: user.email ?? '',
-        deviceId: deviceId,
-      );
-
-      await UserService().setActiveDevice(deviceId: deviceId);
+      try {
+        await _syncUserOnBackend(user);
+      } catch (_) {
+        // Não bloqueia a entrada no app.
+        // A HomePage fará nova tentativa em background.
+      }
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -192,7 +197,9 @@ class _LoginPageState extends State<LoginPage> {
       final code = e.code;
       final msg = e.message ?? '';
       setState(() {
-        if (code == 'sign_in_failed' || msg.contains('DEVELOPER_ERROR') || msg.contains('12501')) {
+        if (code == 'sign_in_failed' ||
+            msg.contains('DEVELOPER_ERROR') ||
+            msg.contains('12501')) {
           error = 'Configuração do Google incorreta. '
               'No Firebase Console, adicione a impressão digital SHA-1 do app Android e ative "Entrar com Google".';
         } else {

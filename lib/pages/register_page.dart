@@ -39,9 +39,24 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
+  Future<void> _syncUserOnBackend(User user, String name) async {
+    final deviceId = await DeviceService.getDeviceId();
+
+    await UserService()
+        .createUserIfNotExists(
+          name: name,
+          email: user.email ?? '',
+          deviceId: deviceId,
+        )
+        .timeout(const Duration(seconds: 12));
+  }
+
   Future<void> register() async {
     if (!mounted) return;
-    setState(() { loading = true; error = null; });
+    setState(() {
+      loading = true;
+      error = null;
+    });
 
     if (nameCtrl.text.trim().isEmpty) {
       setState(() {
@@ -63,13 +78,12 @@ class _RegisterPageState extends State<RegisterPage> {
       await user.updateDisplayName(name);
       await user.reload();
 
-      final deviceId = await DeviceService.getDeviceId();
-
-      await UserService().createUserIfNotExists(
-        name: name,
-        email: user.email ?? '',
-        deviceId: deviceId,
-      );
+      try {
+        await _syncUserOnBackend(FirebaseAuth.instance.currentUser ?? user, name);
+      } catch (_) {
+        // Não bloqueia a entrada no app.
+        // A HomePage fará nova tentativa em background.
+      }
 
       if (!mounted) return;
       Navigator.pop(context);
@@ -101,22 +115,40 @@ class _RegisterPageState extends State<RegisterPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Criar conta', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                const Text(
+                  'Criar conta',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 16),
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nome')),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Nome'),
+                ),
                 const SizedBox(height: 8),
-                TextField(controller: emailCtrl, decoration: const InputDecoration(labelText: 'Email')),
+                TextField(
+                  controller: emailCtrl,
+                  decoration: const InputDecoration(labelText: 'Email'),
+                ),
                 const SizedBox(height: 8),
-                TextField(controller: passCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'Senha')),
+                TextField(
+                  controller: passCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Senha'),
+                ),
                 const SizedBox(height: 16),
-                if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
+                if (error != null)
+                  Text(error!, style: const TextStyle(color: Colors.red)),
                 const SizedBox(height: 8),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: loading ? null : register,
                     child: loading
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
                         : const Text('Cadastrar'),
                   ),
                 ),

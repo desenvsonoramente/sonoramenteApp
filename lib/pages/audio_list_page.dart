@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/audio_model.dart';
@@ -30,75 +31,136 @@ class _AudioListPageState extends State<AudioListPage> {
     _loadAudios();
   }
 
+  void _showSnack(String msg, {Color? color}) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: color,
+      ),
+    );
+  }
+
+  bool _isFree(AudioModel a) => a.requiredBase.trim() == 'gratis';
+
   Future<void> _loadAudios() async {
     if (!mounted) return;
     setState(() => _loading = true);
 
     try {
-      print('📌 [AudioListPage] _loadAudios start | mood=${widget.mood}');
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        if (!mounted) return;
+        setState(() {
+          _audios = [];
+          _accessMap.clear();
+          _loading = false;
+        });
+        _showSnack(
+          'Você precisa estar logada para carregar os áudios.',
+          color: Colors.red,
+        );
+        return;
+      }
 
       final query = await FirebaseFirestore.instance
           .collection('audios')
           .where('category', isEqualTo: widget.mood)
           .get();
 
-      print('✅ [AudioListPage] Firestore ok | docs=${query.docs.length}');
-
       final audios = query.docs
           .map((d) => AudioModel.fromMap(d.id, d.data()))
           .toList();
 
-      // 🔹 Grátis sempre no topo
+      // Ordenação:
+      // 1) grátis
+      // 2) todo o resto (premium)
       audios.sort((a, b) {
-        if (a.requiredBase == 'gratis' && b.requiredBase != 'gratis') return -1;
-        if (a.requiredBase != 'gratis' && b.requiredBase == 'gratis') return 1;
+        final af = _isFree(a);
+        final bf = _isFree(b);
+        if (af && !bf) return -1;
+        if (!af && bf) return 1;
         return 0;
       });
 
-      // ✅ Mostra a lista IMEDIATAMENTE (não depende de claims/acesso)
       if (!mounted) return;
       setState(() {
         _audios = audios;
+        _accessMap.clear();
         _loading = false;
       });
 
-      // ✅ Pré-preenche acessos: grátis é sempre true
+      // Pré-preenche: grátis sempre liberado
       for (final a in audios) {
-        if (a.requiredBase == 'gratis') {
-          _accessMap[a.id] = true;
-        }
+        if (_isFree(a)) _accessMap[a.id] = true;
       }
       if (mounted) setState(() {});
 
-      // ✅ Calcula acessos em background (sem travar UI)
+      // Calcula acesso no background
       for (final audio in audios) {
-        if (audio.requiredBase == 'gratis') continue;
+        if (_isFree(audio)) continue;
 
-        _userService
-            .canAccessAudio(audio: audio)
-            .then((canAccess) {
-              if (!mounted) return;
-              setState(() => _accessMap[audio.id] = canAccess);
-            })
-            .catchError((e, st) {
-              // Se falhar, mantém bloqueado, mas NUNCA some com a lista
-              print('⚠️ [AudioListPage] canAccessAudio erro | audio=${audio.id} | $e');
-              print(st);
-              if (!mounted) return;
-              setState(() => _accessMap[audio.id] = false);
-            });
+        _userService.canAccessAudio(audio: audio).then((canAccess) {
+          if (!mounted) return;
+          setState(() => _accessMap[audio.id] = canAccess);
+        }).catchError((_) {
+          if (!mounted) return;
+          setState(() => _accessMap[audio.id] = false);
+        });
       }
-    } catch (e, st) {
-      print('❌ [AudioListPage] Firestore falhou: $e');
-      print(st);
-
+    } on FirebaseException catch (e) {
       if (!mounted) return;
       setState(() {
         _audios = [];
         _accessMap.clear();
         _loading = false;
       });
+
+      if (e.code == 'permission-denied') {
+        _showSnack(
+          'Sem permissão para carregar os áudios. Faça login novamente.',
+          color: Colors.red,
+        );
+      } else {
+        _showSnack(
+          'Erro ao carregar áudios (${e.code}).',
+          color: Colors.red,
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _audios = [];
+        _accessMap.clear();
+        _loading = false;
+      });
+
+      _showSnack(
+        'Erro inesperado ao carregar os áudios.',
+        color: Colors.red,
+      );
     }
+  }
+
+  void _onTapAudio(AudioModel audio, bool locked) {
+    if (locked) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const PremiumPage()),
+      );
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => AudioPlayerModal(audio: audio),
+      ),
+    );
   }
 
   @override
@@ -135,35 +197,15 @@ class _AudioListPageState extends State<AudioListPage> {
                           itemCount: _audios.length,
                           itemBuilder: (context, index) {
                             final audio = _audios[index];
-                            final isFree = audio.requiredBase == 'gratis';
 
-                            // ✅ Grátis não depende de mapa (definitivo)
-                            final canAccess = isFree ? true : (_accessMap[audio.id] ?? false);
+                            final isFree = _isFree(audio);
+
+                            final canAccess =
+                                isFree ? true : (_accessMap[audio.id] ?? false);
                             final locked = !canAccess;
 
-                            // ✅ “Premium” = não grátis e está bloqueado
-                            final isPremiumLocked = locked && !isFree;
-
                             return GestureDetector(
-                              onTap: () {
-                                if (locked) {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => const PremiumPage(),
-                                    ),
-                                  );
-                                  return;
-                                }
-
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    fullscreenDialog: true,
-                                    builder: (_) => AudioPlayerModal(audio: audio),
-                                  ),
-                                );
-                              },
+                              onTap: () => _onTapAudio(audio, locked),
                               child: Container(
                                 margin: const EdgeInsets.only(bottom: 12),
                                 decoration: BoxDecoration(
@@ -182,35 +224,43 @@ class _AudioListPageState extends State<AudioListPage> {
                                   children: [
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             audio.title,
                                             style: TextStyle(
-                                              fontWeight: isFree ? FontWeight.bold : null,
+                                              fontWeight: isFree
+                                                  ? FontWeight.bold
+                                                  : FontWeight.w600,
                                               fontSize: 16,
                                             ),
                                           ),
                                           const SizedBox(height: 4),
                                           Text(
                                             audio.description,
-                                            style: const TextStyle(fontSize: 14),
+                                            style:
+                                                const TextStyle(fontSize: 14),
                                           ),
                                         ],
                                       ),
                                     ),
 
-                                    // ✅ Badges
-                                    if (isFree) _badge('GRÁTIS', Colors.green),
-                                    if (isPremiumLocked) ...[
+                                    // Badges:
+                                    if (isFree)
+                                      _badge('GRÁTIS', Colors.green)
+                                    else ...[
                                       const SizedBox(width: 8),
-                                      _badge('PREMIUM', const Color(0xFFB8860B)), // dourado
+                                      _badge('PREMIUM',
+                                          const Color(0xFFB8860B)), // dourado
                                     ],
 
                                     const SizedBox(width: 8),
 
                                     Icon(
-                                      locked ? Icons.lock_outline : Icons.play_arrow,
+                                      locked
+                                          ? Icons.lock_outline
+                                          : Icons.play_arrow,
                                     ),
                                   ],
                                 ),
@@ -234,7 +284,7 @@ class _AudioListPageState extends State<AudioListPage> {
       child: Text(
         text,
         style: const TextStyle(
-          color: Colors.white,
+          color: Colors.white, // ✅ texto branco (inclusive no dourado)
           fontSize: 11,
           fontWeight: FontWeight.bold,
         ),

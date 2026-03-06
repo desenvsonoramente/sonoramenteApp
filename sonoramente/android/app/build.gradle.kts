@@ -10,6 +10,11 @@ android {
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
+    // ✅ Necessário quando algum módulo usa buildConfigField / BuildConfig
+    buildFeatures {
+        buildConfig = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -31,8 +36,9 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // TODO: Trocar por signingConfig de release antes de publicar em produção.
+            // Para Teste Fechado com Play App Signing, normalmente já dá certo,
+            // mas o ideal é configurar uma key de release.
             signingConfig = signingConfigs.getByName("debug")
         }
     }

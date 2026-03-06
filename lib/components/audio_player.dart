@@ -41,6 +41,9 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
   bool _listenersAttached = false;
   bool _initStarted = false;
 
+  // evita refresh repetido em loop
+  bool _didForceRefreshToken = false;
+
   @override
   void initState() {
     super.initState();
@@ -107,6 +110,19 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
     return ['gratis/$cleaned', cleaned];
   }
 
+  Future<void> _forceRefreshIdTokenOnce() async {
+    if (_didForceRefreshToken) return;
+    _didForceRefreshToken = true;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // força o token pegar claims novos (Storage rules dependem disso)
+    await user.getIdToken(true);
+    // pequena folga pra propagação
+    await Future.delayed(const Duration(milliseconds: 250));
+  }
+
   Future<String> _resolvePlayableUrl(String urlOrPath) async {
     final candidates = _candidateStorageKeys(urlOrPath);
 
@@ -119,16 +135,21 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
 
     FirebaseException? lastFirebaseError;
 
-    for (final key in candidates) {
+    Future<String> tryGetUrlForKey(String key) async {
       final cached = _urlCache[key];
       if (cached != null) return cached;
 
-      try {
-        final ref = FirebaseStorage.instance.ref(key);
-        final downloadUrl = await ref.getDownloadURL();
+      final ref = FirebaseStorage.instance.ref(key);
+      final downloadUrl = await ref.getDownloadURL();
 
-        _urlCache[key] = downloadUrl;
-        return downloadUrl;
+      _urlCache[key] = downloadUrl;
+      return downloadUrl;
+    }
+
+    for (final key in candidates) {
+      try {
+        // tenta direto
+        return await tryGetUrlForKey(key);
       } on FirebaseException catch (e) {
         lastFirebaseError = e;
 
@@ -137,9 +158,16 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
           continue;
         }
 
-        // permission/unauthorized: para aqui (não adianta tentar outro candidato)
+        // unauthorized/permission-denied: faz 1 refresh e 1 retry
         if (e.code == 'unauthorized' || e.code == 'permission-denied') {
-          rethrow; // mantém stack trace original
+          await _forceRefreshIdTokenOnce();
+
+          try {
+            return await tryGetUrlForKey(key);
+          } on FirebaseException catch (e2) {
+            // se ainda negar, propaga o erro real
+            throw e2;
+          }
         }
 
         // outros erros: tenta próximo mesmo assim
@@ -147,7 +175,6 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
       }
     }
 
-    // Se chegou aqui, nenhum candidato funcionou
     if (lastFirebaseError != null) {
       throw lastFirebaseError;
     }
@@ -173,12 +200,14 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
         return;
       }
 
+      // ✅ garante que Storage vai avaliar claims atualizados
+      await _forceRefreshIdTokenOnce();
+
       _attachListenersOnce();
 
       final sourceKey = widget.audio.audioUrl.trim();
       final playableUrl = await _resolvePlayableUrl(sourceKey);
 
-      // Evita tentar tocar "arquivo local" (FileDataSource)
       final isHttp = playableUrl.startsWith('http://') ||
           playableUrl.startsWith('https://');
       if (!isHttp) return;
@@ -189,9 +218,7 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
       if (!mounted) return;
       await _player.play();
     } on FirebaseException catch (e) {
-      // Se o Storage negou (claims/regras), manda pra Premium
-      final denied =
-          e.code == 'unauthorized' || e.code == 'permission-denied';
+      final denied = e.code == 'unauthorized' || e.code == 'permission-denied';
       if (denied && mounted) {
         Navigator.push(
           context,
@@ -199,7 +226,7 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
         );
       }
     } catch (_) {
-      // opcional: manter silencioso (sem prints) como você pediu
+      // silencioso
     }
   }
 
