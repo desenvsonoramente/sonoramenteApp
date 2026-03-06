@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/user_service.dart';
-import '../pages/login_page.dart';
 import '../pages/reauth_page.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -29,17 +28,17 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
-    // 🔐 Se não logado, manda para login
+    // ✅ Não empilha LoginPage manualmente.
+    // Apenas volta para a raiz e deixa o AuthGate decidir.
     if (user == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginPage()),
-          (_) => false,
-        );
+        Navigator.of(context).popUntil((route) => route.isFirst);
       });
 
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
     return Scaffold(
@@ -76,7 +75,6 @@ class _ProfilePageState extends State<ProfilePage> {
                     style: const TextStyle(color: Colors.black54),
                   ),
                   const SizedBox(height: 32),
-
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
@@ -87,9 +85,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     onPressed: _openPrivacyPolicy,
                     child: const Text('Política de Privacidade'),
                   ),
-
                   const SizedBox(height: 16),
-
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.red,
@@ -113,8 +109,6 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // ================= PRIVACY =================
-
   Future<void> _openPrivacyPolicy() async {
     try {
       final launched = await launchUrl(
@@ -131,8 +125,6 @@ class _ProfilePageState extends State<ProfilePage> {
       _showSnackBar('Erro ao abrir política de privacidade');
     }
   }
-
-  // ================= CONFIRM DELETE =================
 
   void confirmDeleteAccount() {
     showDialog(
@@ -159,8 +151,6 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // ================= DELETE ACCOUNT =================
-
   Future<void> deleteAccount() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -169,15 +159,17 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() => _deleting = true);
 
     try {
-      // 🔹 Chama a Cloud Function segura
+      // ✅ deleteAccount() já faz signOut no UserService
       await _userService.deleteAccount();
 
       if (!mounted) return;
-      _goToLogin();
+
+      // ✅ Volta para a raiz.
+      // O AuthGate, na raiz, mostrará LoginPage sozinho.
+      Navigator.of(context).popUntil((route) => route.isFirst);
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
 
-      // 🔐 Precisa reauth
       if (e.code == 'requires-recent-login') {
         _showSnackBar('Confirme sua identidade para excluir a conta');
 
@@ -189,7 +181,8 @@ class _ProfilePageState extends State<ProfilePage> {
                 try {
                   await _userService.deleteAccount();
                   if (!mounted) return;
-                  _goToLogin();
+
+                  Navigator.of(context).popUntil((route) => route.isFirst);
                 } catch (_) {
                   if (!mounted) return;
                   _showSnackBar('Erro ao excluir conta após reautenticação');
@@ -208,15 +201,6 @@ class _ProfilePageState extends State<ProfilePage> {
       if (mounted) setState(() => _deleting = false);
     }
   }
-
-  void _goToLogin() {
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginPage()),
-      (_) => false,
-    );
-  }
-
-  // ================= UI UTILS =================
 
   void _showSnackBar(String message) {
     if (!mounted) return;
