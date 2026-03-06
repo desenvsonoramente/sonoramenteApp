@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import '../models/audio_model.dart';
 import '../services/device_service.dart';
@@ -15,6 +16,7 @@ class UserService {
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
 
   // ✅ Sempre amarra no Firebase.app() + mesma região das functions deployadas
   final FirebaseFunctions _functions = FirebaseFunctions.instanceFor(
@@ -47,19 +49,6 @@ class UserService {
   // ================== AUDIO ACCESS ======================
   // =====================================================
 
-  /// REGRA DE NEGÓCIO:
-  /// - basePlan: 'gratis' | 'basico'
-  /// - addons: lista de pacotes (ex: 'maternidade', 'luto', ...)
-  ///
-  /// AudioModel:
-  /// - requiredBase: 'gratis' | 'basico'
-  /// - requiredAddon: '' | 'maternidade' | 'luto' | etc
-  ///
-  /// Liberação:
-  /// - requiredBase == 'gratis' => libera
-  /// - requiredBase == 'basico' => exige sessionValid + basePlan=='basico'
-  ///    - requiredAddon vazio => libera
-  ///    - requiredAddon preenchido => exige addon
   Future<bool> canAccessAudio({required AudioModel audio}) async {
     final user = _auth.currentUser;
     if (user == null) return false;
@@ -109,6 +98,7 @@ class UserService {
   // =====================================================
   // ================== USER CREATION =====================
   // =====================================================
+
   // ✅ Produção definitiva: userDoc é criado no BACKEND (Auth Trigger).
   // Mantido para compatibilidade: só garante deviceIdAtivo após login.
   Future<void> createUserIfNotExists({
@@ -124,25 +114,28 @@ class UserService {
   // =====================================================
 
   /// ✅ Chame após login (email ou google).
-  /// Atualiza o deviceIdAtivo do usuário via BACKEND.
+  /// Atualiza o deviceIdAtivo do usuário.
   Future<void> setActiveDevice({required String deviceId}) async {
     final user = _auth.currentUser;
     if (user == null) return;
+
+    final uid = user.uid;
+    final ref = _firestore.collection('users').doc(uid);
 
     // Atualiza cache local também
     _cachedDeviceId = deviceId;
 
     try {
-      final callable = _functions.httpsCallable(
-        'setActiveDevice',
-        options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
-      );
-
-      await callable.call(<String, dynamic>{
-        'deviceId': deviceId,
-      });
-    } on FirebaseFunctionsException {
-      clearCache();
+      await ref.set({
+        'deviceIdAtivo': deviceId,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } on FirebaseException catch (e) {
+      // Se App Check/Rules negarem, não crasha
+      if (e.code == 'permission-denied') {
+        clearCache();
+        return;
+      }
       rethrow;
     }
 
@@ -164,11 +157,14 @@ class UserService {
       );
 
       await callable.call();
+
+      // ✅ Mesmo com sucesso no backend, limpa completamente a sessão local
       await signOut();
     } on FirebaseFunctionsException catch (e) {
       final msg = (e.message == null || e.message!.isEmpty)
           ? 'Não foi possível excluir sua conta agora. Tente novamente.'
           : e.message!;
+
       throw Exception(msg);
     }
   }
@@ -190,7 +186,23 @@ class UserService {
     clearCache();
     _cachedDeviceId = null;
     _deviceIdInFlight = null;
-    await _auth.signOut();
+
+    // ✅ Primeiro tenta encerrar a sessão Google local
+    try {
+      final isSignedInWithGoogle = await _googleSignIn.isSignedIn();
+      if (isSignedInWithGoogle) {
+        await _googleSignIn.signOut();
+      }
+    } catch (_) {
+      // não quebra logout por causa disso
+    }
+
+    // ✅ Depois encerra o FirebaseAuth local
+    try {
+      await _auth.signOut();
+    } catch (_) {
+      // não quebra fluxo
+    }
   }
 
   // =====================================================

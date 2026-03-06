@@ -122,10 +122,12 @@ class _ProfilePageState extends State<ProfilePage> {
         mode: LaunchMode.externalApplication,
       );
 
-      if (!context.mounted) return;
-      if (!launched) _showSnackBar('Não foi possível abrir a Política de Privacidade');
+      if (!mounted) return;
+      if (!launched) {
+        _showSnackBar('Não foi possível abrir a Política de Privacidade');
+      }
     } catch (_) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       _showSnackBar('Erro ao abrir política de privacidade');
     }
   }
@@ -170,10 +172,10 @@ class _ProfilePageState extends State<ProfilePage> {
       // 🔹 Chama a Cloud Function segura
       await _userService.deleteAccount();
 
-      if (!context.mounted) return;
+      if (!mounted) return;
       _goToLogin();
     } on FirebaseAuthException catch (e) {
-      if (!context.mounted) return;
+      if (!mounted) return;
 
       // 🔐 Precisa reauth
       if (e.code == 'requires-recent-login') {
@@ -186,10 +188,10 @@ class _ProfilePageState extends State<ProfilePage> {
               onSuccess: () async {
                 try {
                   await _userService.deleteAccount();
-                  if (!context.mounted) return;
+                  if (!mounted) return;
                   _goToLogin();
                 } catch (_) {
-                  if (!context.mounted) return;
+                  if (!mounted) return;
                   _showSnackBar('Erro ao excluir conta após reautenticação');
                 }
               },
@@ -200,7 +202,7 @@ class _ProfilePageState extends State<ProfilePage> {
         _showSnackBar('Erro ao excluir: ${e.message}');
       }
     } catch (_) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       _showSnackBar('Erro desconhecido ao excluir conta');
     } finally {
       if (mounted) setState(() => _deleting = false);
@@ -217,7 +219,7 @@ class _ProfilePageState extends State<ProfilePage> {
   // ================= UI UTILS =================
 
   void _showSnackBar(String message) {
-    if (!context.mounted) return;
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );

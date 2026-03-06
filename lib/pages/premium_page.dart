@@ -85,7 +85,8 @@ class _PremiumPageState extends State<PremiumPage> {
   }
 
   Future<void> _loadData() async {
-    final loadedProducts = await service.loadProducts(); // por padrão só o produto base
+    final loadedProducts =
+        await service.loadProducts(); // por padrão só o produto base
     final access = await service.loadUserAccess();
 
     if (!mounted) return;
@@ -109,7 +110,11 @@ class _PremiumPageState extends State<PremiumPage> {
   bool get hasBaseProductLoaded => _findBaseProduct() != null;
 
   bool get canAttemptPurchase =>
-      !loading && !purchasing && !hasBasic && iapAvailable && hasBaseProductLoaded;
+      !loading &&
+      !purchasing &&
+      !hasBasic &&
+      iapAvailable &&
+      hasBaseProductLoaded;
 
   String _buttonLabel() {
     if (hasBasic) return 'Plano ativo';
@@ -172,23 +177,28 @@ class _PremiumPageState extends State<PremiumPage> {
         backgroundColor: const Color(0xFFFBFAF7),
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.grey),
-        title: const Text('Plano Premium', style: TextStyle(color: Colors.black)),
+        title: const Text(
+          'Plano Premium',
+          style: TextStyle(color: Colors.black),
+        ),
       ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : Stack(
-              children: [
-                _buildContent(),
-                if (purchasing) _buildLoading(),
-              ],
-            ),
+      body:
+          loading
+              ? const Center(child: CircularProgressIndicator())
+              : Stack(
+                children: [
+                  _buildContent(),
+                  if (purchasing) _buildLoading(),
+                ],
+              ),
     );
   }
 
   Widget _buildContent() {
-    final disabledReason = (!iapAvailable)
-        ? 'Compras indisponíveis neste aparelho.'
-        : (!hasBaseProductLoaded)
+    final disabledReason =
+        (!iapAvailable)
+            ? 'Compras indisponíveis neste aparelho.'
+            : (!hasBaseProductLoaded)
             ? 'Não consegui carregar o produto na Play Store.'
             : '';
 
@@ -217,7 +227,7 @@ class _PremiumPageState extends State<PremiumPage> {
             borderRadius: BorderRadius.circular(28),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 12,
                 offset: const Offset(0, 6),
               ),
@@ -234,7 +244,10 @@ class _PremiumPageState extends State<PremiumPage> {
                 Text(
                   disabledReason,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 12, color: Colors.redAccent),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.redAccent,
+                  ),
                 ),
               ],
               const SizedBox(height: 12),
@@ -245,8 +258,9 @@ class _PremiumPageState extends State<PremiumPage> {
                   onPressed: canAttemptPurchase ? _purchaseBase : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFA8C3B0),
-                    disabledBackgroundColor:
-                        const Color(0xFFA8C3B0).withOpacity(0.35),
+                    disabledBackgroundColor: const Color(
+                      0xFFA8C3B0,
+                    ).withValues(alpha: 0.35),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),
@@ -284,7 +298,7 @@ class _PremiumPageState extends State<PremiumPage> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: const Color(0xFFA8C3B0).withOpacity(0.1),
+              color: const Color(0xFFA8C3B0).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, color: const Color(0xFFA8C3B0)),

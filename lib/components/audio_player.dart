@@ -164,9 +164,9 @@ class _AudioPlayerModalState extends State<AudioPlayerModal>
 
           try {
             return await tryGetUrlForKey(key);
-          } on FirebaseException catch (e2) {
+          } on FirebaseException {
             // se ainda negar, propaga o erro real
-            throw e2;
+            rethrow;
           }
         }
 

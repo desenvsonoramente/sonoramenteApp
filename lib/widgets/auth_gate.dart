@@ -44,7 +44,7 @@ class AuthGate extends StatelessWidget {
                 child: AbsorbPointer(
                   absorbing: true,
                   child: Container(
-                    color: Colors.black.withOpacity(0.35),
+                    color: Colors.black.withValues(alpha: 0.35),
                     child: const Center(
                       child: Card(
                         child: Padding(

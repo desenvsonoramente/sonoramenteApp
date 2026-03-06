@@ -239,7 +239,7 @@ class InAppPurchaseService {
         return;
       }
 
-      final installerName = info.installerName ?? '(null)';
+      final installerName = info.installerName;
       final installerEnumName = info.installer?.name ?? '(null)';
 
       _log('[$where] InstallerInfo | '
@@ -448,7 +448,6 @@ class InAppPurchaseService {
     _guard.lock(reason: 'buy:${product.id}');
 
     try {
-      // ✅ PRINT EXATAMENTE ANTES DO MOMENTO DA COMPRA (pedido)
       await _logAuthSnapshotBeforePurchase(
         where: 'buy:beforeStoreCall',
         productId: product.id,
@@ -519,7 +518,6 @@ class InAppPurchaseService {
 
         if (purchase.status == PurchaseStatus.purchased ||
             purchase.status == PurchaseStatus.restored) {
-          // ---- DEDUP DONE ----
           if (purchaseId.isNotEmpty &&
               _claimDonePurchaseIds.contains(purchaseId)) {
             _warn(
@@ -549,7 +547,6 @@ class InAppPurchaseService {
             continue;
           }
 
-          // ---- DEDUP IN PROGRESS ----
           if (purchaseId.isNotEmpty &&
               _claimInProgressPurchaseIds.contains(purchaseId)) {
             _warn(
@@ -670,7 +667,7 @@ class InAppPurchaseService {
 
     _log(
       '_claimPurchase() start | productId=${purchase.productID} '
-      'purchaseId=${_maskPurchaseId((purchase.purchaseID ?? ''))} '
+      'purchaseId=${_maskPurchaseId(purchase.purchaseID ?? '')} '
       'token=${_maskToken(token)} uid=${_u()} key=$key',
     );
 
@@ -685,11 +682,9 @@ class InAppPurchaseService {
         return false;
       }
 
-      // força refresh do ID token
       final String? idToken = await user.getIdToken(true);
       await user.getIdTokenResult(true);
 
-      // ✅ NEW LOG 1 (corrigido p/ String?): snapshot do ID token IMEDIATAMENTE antes da call
       _log(
         '[_claimPurchase:preCall] IDToken snapshot | token=${_maskToken(idToken ?? '')} uid=${user.uid}',
       );
@@ -700,7 +695,6 @@ class InAppPurchaseService {
 
       await _logFirebaseContext(where: '_claimPurchase:afterRefresh');
 
-      // ✅ NEW LOG 2: snapshot do user imediatamente antes da call
       _log(
         '[_claimPurchase:preCall] Auth snapshot | uid=${user.uid} isAnonymous=${user.isAnonymous} '
         'email=${user.email ?? '(null)'} '
@@ -726,7 +720,6 @@ class InAppPurchaseService {
 
       _log('_claimPurchase() payload keys=${payload.keys.toList()}');
 
-      // ✅ IMPORTANT: recria o callable a cada tentativa (evita “header stale”)
       final result = await _retryWithBackoff(
         () async {
           final callable = _functions.httpsCallable(
