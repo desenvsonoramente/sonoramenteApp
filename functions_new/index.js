@@ -150,22 +150,66 @@ exports.createUserDoc = functionsV1
 
     const userRef = admin.firestore().collection("users").doc(uid);
 
-    await userRef.set(
-      {
-        uid,
-        name: user.displayName ?? "",
-        email: user.email ?? "",
-        photoURL: user.photoURL ?? "",
-        basePlan: "gratis",
-        addons: [],
-        deviceIdAtivo: "",
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
+    try {
+      const existingSnap = await userRef.get();
+      const existingData = existingSnap.exists ? existingSnap.data() || {} : {};
 
-    logger.info("✅ Firestore user doc criado/mesclado", { uid });
+      const existingBasePlan =
+        typeof existingData.basePlan === "string" && existingData.basePlan.trim()
+          ? existingData.basePlan
+          : "gratis";
+
+      const existingAddons = Array.isArray(existingData.addons)
+        ? existingData.addons
+        : [];
+
+      const existingDeviceIdAtivo =
+        typeof existingData.deviceIdAtivo === "string"
+          ? existingData.deviceIdAtivo
+          : "";
+
+      await userRef.set(
+        {
+          uid,
+          name:
+            typeof existingData.name === "string" && existingData.name.trim()
+              ? existingData.name
+              : user.displayName ?? "",
+          email:
+            typeof existingData.email === "string" && existingData.email.trim()
+              ? existingData.email
+              : user.email ?? "",
+          photoURL:
+            typeof existingData.photoURL === "string"
+              ? existingData.photoURL
+              : user.photoURL ?? "",
+          basePlan: existingBasePlan,
+          addons: existingAddons,
+
+          // ✅ CRÍTICO: preserva o deviceIdAtivo se já tiver sido gravado
+          deviceIdAtivo: existingDeviceIdAtivo,
+
+          // ✅ preserva createdAt se já existir
+          createdAt:
+            existingData.createdAt ?? admin.firestore.FieldValue.serverTimestamp(),
+
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      logger.info("✅ Firestore user doc criado/mesclado sem sobrescrever sessão", {
+        uid,
+        preservedDeviceIdAtivo: !!existingDeviceIdAtivo,
+      });
+    } catch (e) {
+      logger.error("❌ Falha ao criar/mesclar user doc", {
+        uid,
+        message: e?.message ?? String(e),
+        stack: e?.stack ?? null,
+      });
+      throw e;
+    }
   });
 
 // =====================================================
