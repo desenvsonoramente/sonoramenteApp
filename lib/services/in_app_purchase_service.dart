@@ -54,6 +54,11 @@ class InAppPurchaseService {
   /// ✅ Controla lock/unlock de compra/restore para evitar signOut durante fluxo.
   final PurchaseGuard _guard = PurchaseGuard.instance;
 
+  /// ✅ Tokens reais dos locks desta instância
+  String? _buyLockToken;
+  String? _restoreLockToken;
+  String? _streamBatchLockToken;
+
   /// SKU pago principal na loja.
   static const String paidBaseProductId = 'pacote_premium';
 
@@ -118,6 +123,48 @@ class InAppPurchaseService {
     return 'prod:${p.productID}:${p.transactionDate ?? ''}';
   }
 
+  // ================= LOCK HELPERS =================
+
+  void _acquireBuyLock(String productId) {
+    _buyLockToken ??= _guard.lock(reason: 'buy:$productId');
+  }
+
+  void _releaseBuyLock() {
+    final t = _buyLockToken;
+    if (t == null || t.isEmpty) return;
+    _guard.unlock(reason: t);
+    _buyLockToken = null;
+  }
+
+  void _acquireRestoreLock() {
+    _restoreLockToken ??= _guard.lock(reason: 'restorePurchases');
+  }
+
+  void _releaseRestoreLock() {
+    final t = _restoreLockToken;
+    if (t == null || t.isEmpty) return;
+    _guard.unlock(reason: t);
+    _restoreLockToken = null;
+  }
+
+  void _acquireStreamBatchLock() {
+    _streamBatchLockToken ??= _guard.lock(reason: 'purchaseStream batch');
+  }
+
+  void _releaseStreamBatchLock() {
+    final t = _streamBatchLockToken;
+    if (t == null || t.isEmpty) return;
+    _guard.unlock(reason: t);
+    _streamBatchLockToken = null;
+  }
+
+  void _releaseAllOwnedLocks({String? where}) {
+    _log('_releaseAllOwnedLocks() ${where != null ? '| where=$where' : ''}');
+    _releaseStreamBatchLock();
+    _releaseRestoreLock();
+    _releaseBuyLock();
+  }
+
   // ================= 🔥 PRINT ANTES DA COMPRA =================
   // (adição pedida: print do usuário logado imediatamente antes do momento da compra)
 
@@ -139,7 +186,6 @@ class InAppPurchaseService {
         'providers=${user.providerData.map((e) => e.providerId).toList()}');
 
     try {
-      // força refresh do token e loga dados úteis
       final r = await user.getIdTokenResult(true);
       final claims = r.claims ?? {};
       _log('[$where] PRE-BUY | getIdTokenResult ok | '
@@ -170,11 +216,9 @@ class InAppPurchaseService {
         'apiKey=${opts.apiKey.isNotEmpty ? '(ok)' : '(vazio)'} '
         'storageBucket=${opts.storageBucket}');
 
-    // Region das functions (pra ficar explícito no log)
     _log('[$where] Functions | region=$_functionsRegion');
     _warnIfRegionMismatch(where: where);
 
-    // Package info (ajuda MUITO a detectar build/sabor/variante errada)
     try {
       final pi = await PackageInfo.fromPlatform();
       _log('[$where] PackageInfo | '
@@ -185,7 +229,6 @@ class InAppPurchaseService {
       _warn('[$where] PackageInfo | failed | $e');
     }
 
-    // Installer source (Play Store vs sideload)
     await _logInstallerInfo(where: where);
 
     final user = _auth.currentUser;
@@ -208,7 +251,6 @@ class InAppPurchaseService {
       _err('[$where] Auth | getIdTokenResult error | $e');
     }
 
-    // App Check (se estiver configurado no app)
     try {
       final t = await FirebaseAppCheck.instance.getToken(true);
       _log('[$where] AppCheck | token=${_maskToken(t ?? '')}');
@@ -223,7 +265,6 @@ class InAppPurchaseService {
         'precisa redeployar as functions nessa região e atualizar o app.');
   }
 
-  /// ✅ "À prova de tudo":
   Future<void> _logInstallerInfo({required String where}) async {
     if (!Platform.isAndroid && !Platform.isIOS) {
       _log('[$where] InstallerInfo | n/a (platform=${_platform()})');
@@ -299,7 +340,7 @@ class InAppPurchaseService {
       onError: (err) {
         _err('purchaseStream onError | $err');
         _errorController.add('Erro inesperado ao processar pagamento.');
-        _guard.unlock(reason: 'purchaseStream onError');
+        _releaseAllOwnedLocks(where: 'purchaseStream onError');
       },
       cancelOnError: false,
     );
@@ -314,7 +355,7 @@ class InAppPurchaseService {
     _subscription = null;
     _initialized = false;
 
-    _guard.unlock(reason: 'dispose');
+    _releaseAllOwnedLocks(where: 'dispose');
 
     if (!_successController.isClosed) _successController.close();
     if (!_errorController.isClosed) _errorController.close();
@@ -381,7 +422,6 @@ class InAppPurchaseService {
     }
   }
 
-  // ✅ Compat: método antigo que ainda pode estar sendo chamado em algum lugar
   Future<List<ProductDetails>> loadProduts({
     bool includeAddons = includeAddonsByDefault,
   }) {
@@ -445,7 +485,7 @@ class InAppPurchaseService {
       return;
     }
 
-    _guard.lock(reason: 'buy:${product.id}');
+    _acquireBuyLock(product.id);
 
     try {
       await _logAuthSnapshotBeforePurchase(
@@ -459,7 +499,7 @@ class InAppPurchaseService {
     } catch (e) {
       _err('buy() exception | $e');
       _errorController.add('Não foi possível iniciar a compra. Tente novamente.');
-      _guard.unlock(reason: 'buy exception');
+      _releaseBuyLock();
     }
   }
 
@@ -476,7 +516,7 @@ class InAppPurchaseService {
     }
 
     _log('restorePurchases() start | uid=${_u()}');
-    _guard.lock(reason: 'restorePurchases');
+    _acquireRestoreLock();
 
     try {
       await _iap.restorePurchases();
@@ -484,7 +524,7 @@ class InAppPurchaseService {
     } catch (e) {
       _err('restorePurchases() exception | $e');
       _errorController.add('Não foi possível restaurar compras. Tente novamente.');
-      _guard.unlock(reason: 'restorePurchases exception');
+      _releaseRestoreLock();
     }
   }
 
@@ -493,7 +533,7 @@ class InAppPurchaseService {
   Future<void> _onPurchaseUpdate(List<PurchaseDetails> purchases) async {
     _log('_onPurchaseUpdate() | events=${purchases.length} uid=${_u()}');
 
-    _guard.lock(reason: 'purchaseStream batch');
+    _acquireStreamBatchLock();
 
     try {
       for (final purchase in purchases) {
@@ -631,8 +671,9 @@ class InAppPurchaseService {
         }
       }
     } finally {
-      _guard.unlock(reason: 'purchaseStream batch done');
-      _guard.unlock(reason: 'safety unlock after batch');
+      _releaseStreamBatchLock();
+      _releaseRestoreLock();
+      _releaseBuyLock();
     }
   }
 
