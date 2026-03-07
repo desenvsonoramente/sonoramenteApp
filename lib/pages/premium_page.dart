@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
 import '../services/in_app_purchase_service.dart';
+import 'home_page.dart';
 
 class PremiumPage extends StatefulWidget {
   const PremiumPage({super.key});
@@ -47,14 +48,17 @@ class _PremiumPageState extends State<PremiumPage> {
     _successSub = service.onSuccess.listen((msg) async {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.green),
-      );
-
-      // Recarrega dados após sucesso
+      // Recarrega dados locais antes de sair da tela
       await _loadData();
 
-      if (mounted) setState(() => purchasing = false);
+      if (!mounted) return;
+      setState(() => purchasing = false);
+
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomePage()),
+        (route) => false,
+      );
     });
 
     _errorSub = service.onError.listen((msg) {
@@ -182,23 +186,21 @@ class _PremiumPageState extends State<PremiumPage> {
           style: TextStyle(color: Colors.black),
         ),
       ),
-      body:
-          loading
-              ? const Center(child: CircularProgressIndicator())
-              : Stack(
-                children: [
-                  _buildContent(),
-                  if (purchasing) _buildLoading(),
-                ],
-              ),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : Stack(
+              children: [
+                _buildContent(),
+                if (purchasing) _buildLoading(),
+              ],
+            ),
     );
   }
 
   Widget _buildContent() {
-    final disabledReason =
-        (!iapAvailable)
-            ? 'Compras indisponíveis neste aparelho.'
-            : (!hasBaseProductLoaded)
+    final disabledReason = (!iapAvailable)
+        ? 'Compras indisponíveis neste aparelho.'
+        : (!hasBaseProductLoaded)
             ? 'Não consegui carregar o produto na Play Store.'
             : '';
 
@@ -258,9 +260,8 @@ class _PremiumPageState extends State<PremiumPage> {
                   onPressed: canAttemptPurchase ? _purchaseBase : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFA8C3B0),
-                    disabledBackgroundColor: const Color(
-                      0xFFA8C3B0,
-                    ).withValues(alpha: 0.35),
+                    disabledBackgroundColor:
+                        const Color(0xFFA8C3B0).withValues(alpha: 0.35),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),
