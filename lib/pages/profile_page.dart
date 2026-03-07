@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/user_service.dart';
 import '../pages/reauth_page.dart';
+import '../pages/login_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -28,12 +29,14 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
-    // ✅ Não empilha LoginPage manualmente.
-    // Apenas volta para a raiz e deixa o AuthGate decidir.
+    // Se já não houver usuário, leva direto para login limpando a pilha.
     if (user == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+          (route) => false,
+        );
       });
 
       return const Scaffold(
@@ -96,7 +99,10 @@ class _ProfilePageState extends State<ProfilePage> {
                         ? const SizedBox(
                             height: 18,
                             width: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
                         : const Text('Excluir conta'),
                   ),
@@ -159,14 +165,14 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() => _deleting = true);
 
     try {
-      // ✅ deleteAccount() já faz signOut no UserService
       await _userService.deleteAccount();
 
       if (!mounted) return;
 
-      // ✅ Volta para a raiz.
-      // O AuthGate, na raiz, mostrará LoginPage sozinho.
-      Navigator.of(context).popUntil((route) => route.isFirst);
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+        (route) => false,
+      );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
 
@@ -182,7 +188,10 @@ class _ProfilePageState extends State<ProfilePage> {
                   await _userService.deleteAccount();
                   if (!mounted) return;
 
-                  Navigator.of(context).popUntil((route) => route.isFirst);
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => const LoginPage()),
+                    (route) => false,
+                  );
                 } catch (_) {
                   if (!mounted) return;
                   _showSnackBar('Erro ao excluir conta após reautenticação');
