@@ -4,7 +4,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/user_service.dart';
 import '../pages/reauth_page.dart';
-import '../pages/login_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -29,14 +28,12 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
-    // Se já não houver usuário, leva direto para login limpando a pilha.
+    // Não empilha LoginPage manualmente.
+    // Volta para a raiz e deixa o fluxo principal decidir.
     if (user == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginPage()),
-          (route) => false,
-        );
+        Navigator.of(context).popUntil((route) => route.isFirst);
       });
 
       return const Scaffold(
@@ -157,6 +154,15 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  Future<void> _waitUntilSignedOut() async {
+    if (FirebaseAuth.instance.currentUser == null) return;
+
+    await FirebaseAuth.instance
+        .authStateChanges()
+        .firstWhere((u) => u == null)
+        .timeout(const Duration(seconds: 5), onTimeout: () => null);
+  }
+
   Future<void> deleteAccount() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -167,12 +173,11 @@ class _ProfilePageState extends State<ProfilePage> {
     try {
       await _userService.deleteAccount();
 
+      await _waitUntilSignedOut();
+
       if (!mounted) return;
 
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginPage()),
-        (route) => false,
-      );
+      Navigator.of(context).popUntil((route) => route.isFirst);
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
 
@@ -186,12 +191,10 @@ class _ProfilePageState extends State<ProfilePage> {
               onSuccess: () async {
                 try {
                   await _userService.deleteAccount();
-                  if (!mounted) return;
+                  await _waitUntilSignedOut();
 
-                  Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (_) => const LoginPage()),
-                    (route) => false,
-                  );
+                  if (!mounted) return;
+                  Navigator.of(context).popUntil((route) => route.isFirst);
                 } catch (_) {
                   if (!mounted) return;
                   _showSnackBar('Erro ao excluir conta após reautenticação');
