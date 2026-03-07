@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
 import '../services/in_app_purchase_service.dart';
-import 'home_page.dart';
 
 class PremiumPage extends StatefulWidget {
   const PremiumPage({super.key});
@@ -48,17 +47,13 @@ class _PremiumPageState extends State<PremiumPage> {
     _successSub = service.onSuccess.listen((msg) async {
       if (!mounted) return;
 
-      // Recarrega dados locais antes de sair da tela
       await _loadData();
 
       if (!mounted) return;
       setState(() => purchasing = false);
 
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const HomePage()),
-        (route) => false,
-      );
+      Navigator.of(context).popUntil((route) => route.isFirst);
     });
 
     _errorSub = service.onError.listen((msg) {
